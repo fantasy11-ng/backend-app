@@ -30,3 +30,44 @@ export enum fixturesIncludes {
 }
 
 export type FixtureInclude = keyof typeof fixturesIncludes;
+
+export type SportmonksFixture = {
+  id: number;
+  sport_id: number;
+  league_id: number;
+  season_id: number;
+  stage_id: number;
+  group_id?: number;
+  aggregate_id?: number;
+  round_id: number;
+  state_id: number;
+  venue_id: number;
+  name: string;
+  starting_at: string;
+  result_info: string;
+  leg: string;
+  details: string;
+  length: number;
+  placeholder: boolean;
+  has_odds: boolean;
+  starting_at_timestamp: number;
+  participants?: {
+    id: number;
+    sport_id: number;
+    country_id: number;
+    venue_id: number;
+    gender: string;
+    name: string;
+    short_code: string;
+    image_path: string;
+    founded: number;
+    type: string;
+    placeholder: boolean;
+    last_played_at: string;
+    meta: {
+      location: string;
+      winner: boolean;
+      position: number;
+    };
+  }[];
+};

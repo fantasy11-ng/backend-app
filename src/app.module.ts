@@ -1,20 +1,21 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { UsersModule } from './users/users.module';
-import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
 import configurations from './common/config/env-configuration';
 import authConfiguration from './common/config/auth-configuration';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { User } from './users/entities/user.entity';
+import { User } from './modules/users/entities/user.entity';
 import { mainConfig } from './common/config/main.config';
 import { CommonModule } from './common/common.module';
 import { TeamModule } from './modules/team/team.module';
 import { PlayersModule } from './modules/players/players.module';
 import { ContentModule } from './modules/content/content.module';
 import { SettingsModule } from './modules/settings/settings.module';
-import { PreditorModule } from './modules/preditor/preditor.module';
+import { PreditorModule } from './modules/predictor/preditor.module';
+import { StagesModule } from './modules/stages/stages.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { PreditorModule } from './modules/preditor/preditor.module';
     ContentModule,
     SettingsModule,
     PreditorModule,
+    StagesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

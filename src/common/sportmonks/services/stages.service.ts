@@ -15,7 +15,7 @@ export class SportmonksStagesService {
           `/football/stages/seasons/${seasonId}`,
           {
             params: {
-              include: 'type;currentRound',
+              include: 'type;rounds;currentRound;groups;fixtures.participants',
             },
           },
         ),

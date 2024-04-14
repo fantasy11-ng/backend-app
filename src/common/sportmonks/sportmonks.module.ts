@@ -9,6 +9,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ServiceLeague } from './entities/service-league.entity';
 import { ServiceSeason } from './entities/service-season.entity';
 import { SportmonksPlayersService } from './services/players.service';
+import { SportmonksStagesService } from './services/stages.service';
 
 @Module({
   imports: [
@@ -34,12 +35,14 @@ import { SportmonksPlayersService } from './services/players.service';
     SportmonksCoreService,
     SportmonksLeaguesService,
     SportmonksPlayersService,
+    SportmonksStagesService,
   ],
   exports: [
     SportmonksService,
     SportmonksCoreService,
     SportmonksLeaguesService,
     SportmonksPlayersService,
+    SportmonksStagesService,
   ],
 })
 export class SportmonksModule {}

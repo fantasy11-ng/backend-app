@@ -4,7 +4,7 @@ import { TeamService } from './team.service';
 import { SchemaValidator } from 'src/common/validators/schema.validator';
 import { CreateTeamDto, createTeamDtoSchema } from './dto/create-team.dto';
 import { Request } from 'express';
-import { User } from 'src/users/entities/user.entity';
+import { User } from '@/modules/users/entities/user.entity';
 
 @Controller('team')
 export class TeamController {

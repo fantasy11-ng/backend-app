@@ -1,5 +1,5 @@
 import { Player } from 'src/modules/players/entities/player.entity';
-import { User } from 'src/users/entities/user.entity';
+import { User } from '@/modules/users/entities/user.entity';
 import {
   Column,
   Entity,

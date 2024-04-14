@@ -1,5 +1,6 @@
 export type SportmonksResponse<T = void> = {
-  data: T;
+  data?: T;
+  message: string;
   pagination?: {
     count: number;
     per_page: number;

@@ -1,3 +1,6 @@
+import { SportmonksFixture } from './fixtures.types';
+import { SportmonksGroup } from './groups.type';
+
 export type SportmonksStage = {
   id: number;
   sport_id: number;
@@ -20,4 +23,6 @@ export type SportmonksStage = {
     model_type: string;
     stat_group: unknown;
   };
+  groups?: SportmonksGroup[];
+  fixtures?: SportmonksFixture[];
 };
