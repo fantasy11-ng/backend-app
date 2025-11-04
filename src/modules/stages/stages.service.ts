@@ -8,6 +8,7 @@ import { Group } from './entities/group.entity';
 import { Stage } from './entities/stage.entity';
 import { SportmonksStage } from '@/common/sportmonks/types/stages.type';
 import { FootballTeam } from '../team/entities/football-team.entity';
+import { Fixture } from './entities/fixture.entity';
 
 @Injectable()
 export class StagesService {
@@ -30,8 +31,9 @@ export class StagesService {
     }
 
     await this.syncStages(stages.data);
-    // Sync group and teams to reduce loops and imporove perf
+    // Sync group and teams to reduce loops and improve perf
     await this.syncGroupsAndTeams(stages.data);
+    await this.syncFixtures(stages.data);
   }
 
   async syncStages(stages: SportmonksStage[]) {
@@ -61,41 +63,33 @@ export class StagesService {
       throw new BadGatewayException('Service Group Stage unavailable!');
     }
 
-    const groupTeams: {
-      [key: string]: {
+    const groupTeams: Record<
+      string,
+      {
         id: number;
         name: string;
-        [key: number]: {
-          id: number;
-          name: string;
-          short: string;
-          logo: string;
-        };
-      };
-    } = {};
+        map: Record<
+          number,
+          { id: number; name: string; short: string; logo: string }
+        >;
+      }
+    > = {};
 
-    for (const fixture of serviceGroupStage.fixtures) {
-      const group = serviceGroupStage.groups.find(
+    for (const fixture of serviceGroupStage.fixtures || []) {
+      const group = serviceGroupStage.groups?.find(
         (item) => item.id === fixture.group_id,
       );
-      if (!group) {
-        continue;
+      if (!group) continue;
+      if (!groupTeams[group.name]) {
+        groupTeams[group.name] = { id: group.id, name: group.name, map: {} };
       }
-
-      if (!groupTeams[group.name])
-        groupTeams[group.name] = {
-          id: group.id,
-          name: group.name,
+      for (const participant of fixture.participants || []) {
+        groupTeams[group.name].map[participant.id] = {
+          id: participant.id,
+          name: participant.name,
+          short: participant.short_code,
+          logo: participant.image_path,
         };
-      else {
-        fixture.participants.map((participant) => {
-          groupTeams[group.name][participant.id] = {
-            id: participant.id,
-            name: participant.name,
-            short: participant.short_code,
-            logo: participant.image_path,
-          };
-        });
       }
     }
 
@@ -107,8 +101,21 @@ export class StagesService {
     });
 
     for (const group of groups) {
-      const { id, name, ...rest } = group;
-      const teams = Object.values(rest);
+      const typed = group as unknown as {
+        id: number;
+        name: string;
+        map: Record<
+          number,
+          { id: number; name: string; short: string; logo: string }
+        >;
+      };
+      const { id, name, map } = typed;
+      const teams = Object.values(map) as {
+        id: number;
+        name: string;
+        short: string;
+        logo: string;
+      }[];
 
       await groupsRepo.save({
         id,
@@ -119,6 +126,40 @@ export class StagesService {
 
       await this.syncTeams(teams);
     }
+  }
+
+  async syncFixtures(stages: SportmonksStage[]) {
+    const fixturesRepo = this.db.getRepository(Fixture);
+
+    const serviceGroupStage = stages.find(
+      (stage) => stage.type.code === 'group-stage',
+    );
+    if (!serviceGroupStage) {
+      throw new BadGatewayException('Service Group Stage unavailable!');
+    }
+
+    for (const fx of serviceGroupStage.fixtures || []) {
+      const participantIds = (fx.participants || []).map((p) => p.id);
+      await fixturesRepo.save({
+        id: fx.id,
+        stageId: serviceGroupStage.id,
+        groupId: fx.group_id,
+        startingAt: new Date(fx.starting_at),
+        externalSeasonId: serviceGroupStage.season_id,
+        participantTeamIds: participantIds,
+      });
+    }
+  }
+
+  async getTournamentStartAt(seasonId: number) {
+    const qb = this.db
+      .getRepository(Fixture)
+      .createQueryBuilder('f')
+      .where('f.externalSeasonId = :seasonId', { seasonId })
+      .orderBy('f.startingAt', 'ASC')
+      .limit(1);
+    const first = await qb.getOne();
+    return first?.startingAt ?? null;
   }
 
   async syncTeams(
@@ -142,6 +183,10 @@ export class StagesService {
 
   async getOne({ id }: { id: number }) {
     return this.db.getRepository(Stage).findOne({ where: { id } });
+  }
+
+  async getByCode({ code }: { code: string }) {
+    return this.db.getRepository(Stage).findOne({ where: { code } });
   }
 
   async getGroups() {

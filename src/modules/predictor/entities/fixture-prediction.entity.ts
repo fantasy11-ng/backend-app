@@ -1,5 +1,5 @@
-import { FootballTeam } from '@/modules/team/entities/football-team.entity';
 import { User } from '@/modules/users/entities/user.entity';
+import { FootballTeam } from '@/modules/team/entities/football-team.entity';
 import {
   Column,
   CreateDateColumn,
@@ -11,36 +11,23 @@ import {
 } from 'typeorm';
 
 @Entity()
-export class Prediction {
+export class FixturePrediction {
   @PrimaryGeneratedColumn()
   id: number;
-  @Column({ nullable: true })
-  externalFixtureId?: number;
 
   @ManyToOne(() => User)
   @JoinColumn()
   owner: User;
 
   @Column()
-  stageId: number;
+  externalFixtureId: number;
   @Column()
-  groupId: number;
+  roundCode: string; // r16, qf, sf, final
   @Column({ nullable: true })
   externalSeasonId?: number;
 
-  @Column('jsonb')
-  teams: {
-    name: string;
-    short: string;
-    logo: string;
-    id: number;
-    index: number;
-  }[];
-
   @ManyToOne(() => FootballTeam)
-  winner: FootballTeam;
-  @ManyToOne(() => FootballTeam)
-  runnerUp: FootballTeam;
+  predictedWinner: FootballTeam;
 
   @CreateDateColumn()
   createdAt: Date;

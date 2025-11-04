@@ -19,6 +19,7 @@ export class AuthService {
   async signUp(signUpDto: SignUpDto) {
     const user = new User();
     user.email = signUpDto.email;
+    user.fullName = `${signUpDto.firstName} ${signUpDto.lastName}`.trim();
     user.password = await bcrypt.hash(signUpDto.password, 12);
 
     await this.usersService.create(user);

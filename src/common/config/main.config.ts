@@ -19,6 +19,11 @@ export const mainConfig = () => {
         clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
         callbackUrl: process.env.GOOGLE_CALLBACK_URL as string,
       },
+      facebook: {
+        clientID: process.env.FACEBOOK_CLIENT_ID as string,
+        clientSecret: process.env.FACEBOOK_CLIENT_SECRET as string,
+        callbackUrl: process.env.FACEBOOK_CALLBACK_URL as string,
+      },
     },
     db: {
       url: process.env.DATABASE_URL,
@@ -33,6 +38,11 @@ export const mainConfig = () => {
         baseUrl: process.env.SPORTMONKS_BASE_URL,
         apiToken: process.env.SPORTMONKS_API_TOKEN as string,
       },
+    },
+    predictor: {
+      competitionOverride: process.env.PREDICTOR_COMPETITION || '', // 'world-cup' | 'afcon' | 'ucl'
+      seasonOverride:
+        parseInt(process.env.PREDICTOR_SEASON_ID || '0', 10) || undefined,
     },
   };
 };

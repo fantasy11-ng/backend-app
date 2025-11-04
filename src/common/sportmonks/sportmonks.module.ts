@@ -10,6 +10,8 @@ import { ServiceLeague } from './entities/service-league.entity';
 import { ServiceSeason } from './entities/service-season.entity';
 import { SportmonksPlayersService } from './services/players.service';
 import { SportmonksStagesService } from './services/stages.service';
+import { SportmonksStandingsService } from './services/standings.service';
+import { SportmonksSeasonsService } from './services/seasons.service';
 
 @Module({
   imports: [
@@ -21,10 +23,13 @@ import { SportmonksStagesService } from './services/stages.service';
           'externalServices.sportmonks',
           { infer: true },
         );
+        const token = sportmonksConfig.apiToken?.startsWith('Bearer ')
+          ? sportmonksConfig.apiToken
+          : `Bearer ${sportmonksConfig.apiToken}`;
         return {
           baseURL: sportmonksConfig.baseUrl,
           headers: {
-            Authorization: sportmonksConfig.apiToken,
+            Authorization: token,
           },
         };
       },
@@ -36,6 +41,8 @@ import { SportmonksStagesService } from './services/stages.service';
     SportmonksLeaguesService,
     SportmonksPlayersService,
     SportmonksStagesService,
+    SportmonksStandingsService,
+    SportmonksSeasonsService,
   ],
   exports: [
     SportmonksService,
@@ -43,6 +50,8 @@ import { SportmonksStagesService } from './services/stages.service';
     SportmonksLeaguesService,
     SportmonksPlayersService,
     SportmonksStagesService,
+    SportmonksStandingsService,
+    SportmonksSeasonsService,
   ],
 })
 export class SportmonksModule {}

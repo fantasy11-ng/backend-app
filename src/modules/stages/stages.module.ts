@@ -4,12 +4,13 @@ import { StagesController } from './stages.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Stage } from './entities/stage.entity';
 import { Group } from './entities/group.entity';
+import { Fixture } from './entities/fixture.entity';
 import { SportmonksModule } from '@/common/sportmonks/sportmonks.module';
 import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Stage, Group]),
+    TypeOrmModule.forFeature([Stage, Group, Fixture]),
     SportmonksModule,
     SettingsModule,
   ],

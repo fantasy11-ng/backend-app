@@ -22,6 +22,7 @@ async function bootstrap() {
     .setDescription('The official API documentation for Fabtasy 11 backend')
     .setVersion('1.0')
     .addTag('fantasy 11')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document, {

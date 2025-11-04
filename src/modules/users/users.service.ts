@@ -42,6 +42,10 @@ export class UsersService {
     return this.usersRepository.findOneBy({ googleId });
   }
 
+  async findOneByFacebookId(facebookId: string): Promise<User | null> {
+    return this.usersRepository.findOneBy({ facebookId });
+  }
+
   async findByGoogleIdOrCreateUser(user: {
     email: string;
     phone?: string;
@@ -55,6 +59,25 @@ export class UsersService {
       userEntity.phone = user.phone;
       userEntity.fullName = user.fullName;
       userEntity.googleId = user.googleId;
+      await this.usersRepository.save(userEntity);
+    }
+
+    return userEntity;
+  }
+
+  async findByFacebookIdOrCreateUser(user: {
+    email: string;
+    phone?: string;
+    fullName: string;
+    facebookId: string;
+  }) {
+    let userEntity = await this.findOneByFacebookId(user.facebookId);
+    if (!userEntity) {
+      userEntity = new User();
+      userEntity.email = user.email;
+      userEntity.phone = user.phone || '';
+      userEntity.fullName = user.fullName;
+      userEntity.facebookId = user.facebookId;
       await this.usersRepository.save(userEntity);
     }
 

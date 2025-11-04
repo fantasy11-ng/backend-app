@@ -9,7 +9,7 @@ export class SportmonksService {
 
   async getPlayerById(playerId) {
     const response = await firstValueFrom(
-      this.httpService.get(`players/${playerId}`),
+      this.httpService.get(`/football/players/${playerId}`),
     );
     return response.data;
   }
@@ -22,7 +22,7 @@ export class SportmonksService {
     limit: number;
   }): Promise<SportmonksResponse> {
     const { data } = await firstValueFrom(
-      this.httpService.get<SportmonksResponse>(`players}`, {
+      this.httpService.get<SportmonksResponse>(`/football/players`, {
         params: {
           per_page: limit,
           page,

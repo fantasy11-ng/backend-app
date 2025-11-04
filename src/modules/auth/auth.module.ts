@@ -6,6 +6,7 @@ import { UsersModule } from '@/modules/users/users.module';
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStartegy } from './strategies/jwt.startegy';
 import { GoogleStrategy } from './strategies/google.strategy';
+import { FacebookStrategy } from './strategies/facebook.strategy';
 import { RefreshTokenService } from './services/refresh-token/refresh-token.service';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from 'src/common/config/main.config';
@@ -36,6 +37,7 @@ import { RefreshToken } from './entities/refresh-token';
     LocalStrategy,
     JwtStartegy,
     GoogleStrategy,
+    FacebookStrategy,
     RefreshTokenService,
     PasswordService,
   ],

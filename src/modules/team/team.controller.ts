@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 import { TeamService } from './team.service';
 import { SchemaValidator } from 'src/common/validators/schema.validator';
 import { CreateTeamDto, createTeamDtoSchema } from './dto/create-team.dto';

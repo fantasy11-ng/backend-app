@@ -14,7 +14,7 @@ import { TeamModule } from './modules/team/team.module';
 import { PlayersModule } from './modules/players/players.module';
 import { ContentModule } from './modules/content/content.module';
 import { SettingsModule } from './modules/settings/settings.module';
-import { PreditorModule } from './modules/predictor/preditor.module';
+import { PredictorModule } from './modules/predictor/preditor.module';
 import { StagesModule } from './modules/stages/stages.module';
 
 @Module({
@@ -29,6 +29,9 @@ import { StagesModule } from './modules/stages/stages.module';
       synchronize: true,
       entities: [User],
       autoLoadEntities: true,
+      ssl: {
+        rejectUnauthorized: false,
+      },
     }),
     UsersModule,
     AuthModule,
@@ -37,7 +40,7 @@ import { StagesModule } from './modules/stages/stages.module';
     PlayersModule,
     ContentModule,
     SettingsModule,
-    PreditorModule,
+    PredictorModule,
     StagesModule,
   ],
   controllers: [AppController],

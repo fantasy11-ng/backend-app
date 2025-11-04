@@ -31,6 +31,9 @@ export class User {
   googleId?: string;
 
   @Column({ default: '' })
+  facebookId?: string;
+
+  @Column({ default: '' })
   refreshToken?: string;
 
   @OneToMany(() => Prediction, (predtion) => predtion.owner)

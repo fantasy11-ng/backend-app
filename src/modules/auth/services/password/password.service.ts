@@ -15,7 +15,7 @@ export class PasswordService {
 
   async requestPasswordReset(email: string) {
     const message =
-      'If your email address is registered, a password reset link have been sent.';
+      'You will receive a password reset email soon. Follow the link in your email to reset your password.';
 
     const user = await this.usersService.findOne({ email });
     if (!user) {
