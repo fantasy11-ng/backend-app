@@ -23,13 +23,10 @@ import { SportmonksSeasonsService } from './services/seasons.service';
           'externalServices.sportmonks',
           { infer: true },
         );
-        const token = sportmonksConfig.apiToken?.startsWith('Bearer ')
-          ? sportmonksConfig.apiToken
-          : `Bearer ${sportmonksConfig.apiToken}`;
         return {
           baseURL: sportmonksConfig.baseUrl,
-          headers: {
-            Authorization: token,
+          params: {
+            api_token: sportmonksConfig.apiToken,
           },
         };
       },

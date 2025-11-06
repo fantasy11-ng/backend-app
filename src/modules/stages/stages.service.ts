@@ -87,7 +87,7 @@ export class StagesService {
         groupTeams[group.name].map[participant.id] = {
           id: participant.id,
           name: participant.name,
-          short: participant.short_code,
+          short: participant.short_code || participant.name.split(' ')[0],
           logo: participant.image_path,
         };
       }

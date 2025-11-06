@@ -8,10 +8,9 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
-    cors: {
-      origin: '*',
-      credentials: true,
-    },
+  });
+  app.enableCors({
+    origin: '*',
   });
   app.useGlobalFilters(new TypeORMExceptionFilter(), new HttpExceptionFilter());
   app.useGlobalInterceptors(new ResponseInterceptor());
@@ -34,6 +33,6 @@ async function bootstrap() {
     ],
   });
 
-  (await app).listen(3000);
+  await app.listen(3000);
 }
-export default bootstrap();
+bootstrap();

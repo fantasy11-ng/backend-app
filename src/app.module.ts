@@ -26,7 +26,7 @@ import { StagesModule } from './modules/stages/stages.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      synchronize: true,
+      synchronize: false,
       entities: [User],
       autoLoadEntities: true,
       ssl: {
