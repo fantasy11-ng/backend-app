@@ -14,6 +14,7 @@ import { PasswordService } from './services/password/password.service';
 import { CommonModule } from 'src/common/common.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RefreshToken } from './entities/refresh-token';
+import { RolesGuard } from './guards/roles.guard';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { RefreshToken } from './entities/refresh-token';
     FacebookStrategy,
     RefreshTokenService,
     PasswordService,
+    RolesGuard,
   ],
   controllers: [AuthController],
 })

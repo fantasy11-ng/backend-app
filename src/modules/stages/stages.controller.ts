@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
@@ -6,6 +6,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { StagesService } from './stages.service';
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '@/modules/auth/guards/roles.guard';
+import { Roles } from '@/modules/auth/guards/roles.decorator';
+import { UserRole } from '@/modules/users/entities/user.entity';
 
 @ApiTags('Stages')
 @Controller('stages')
@@ -93,6 +97,8 @@ export class StagesController {
     description:
       'Admin: triggers data sync from SportMonks for the active season.',
   })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOkResponse({
     description: 'Sync result',
     schema: {

@@ -21,7 +21,7 @@ class CreatePredictionTeam {
 export class CreatePredictionDto {
   stageId: number;
   groupId: number;
-  @ApiProperty({ type: () => CreatePredictionTeam })
+  @ApiProperty({ type: [CreatePredictionTeam] })
   teams: CreatePredictionTeam[];
   winnerId: number;
   runnerUpId: number;

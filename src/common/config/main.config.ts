@@ -43,6 +43,8 @@ export const mainConfig = () => {
       competitionOverride: process.env.PREDICTOR_COMPETITION || '', // 'world-cup' | 'afcon' | 'ucl'
       seasonOverride:
         parseInt(process.env.PREDICTOR_SEASON_ID || '0', 10) || undefined,
+      allowPredictionsAfterKickoff:
+        process.env.PREDICTOR_ALLOW_AFTER_KICKOFF === 'true',
     },
   };
 };

@@ -9,7 +9,7 @@ import {
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
-import { FacebookAuthGuard } from './guards/facebook-auth.guard';
+//import { FacebookAuthGuard } from './guards/facebook-auth.guard';
 import { SignUpDto, signUpDtoSchema } from './dto/sign-up.dto';
 import { Request } from 'express';
 import { User } from '@/modules/users/entities/user.entity';
@@ -33,7 +33,7 @@ import {
 } from './dto/auth.responses';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
-@ApiTags('auth')
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -83,20 +83,20 @@ export class AuthController {
     return this.authService.signIn(req['user'] as User);
   }
 
-  @Get('facebook')
-  @UseGuards(FacebookAuthGuard)
-  @ApiOperation({ summary: 'Initiate Facebook OAuth flow' })
-  signInUsingFacebook() {
-    return 'Redirecting to facebook';
-  }
+  //@Get('facebook')
+  //@UseGuards(FacebookAuthGuard)
+  //@ApiOperation({ summary: 'Initiate Facebook OAuth flow' })
+  //signInUsingFacebook() {
+  //  return 'Redirecting to facebook';
+  //}
 
-  @Get('facebook/callback')
-  @UseGuards(FacebookAuthGuard)
-  @ApiOperation({ summary: 'Facebook OAuth callback' })
-  @ApiOkResponse({ type: SignInResponse })
-  facebookCallback(@Req() req: Request) {
-    return this.authService.signIn(req['user'] as User);
-  }
+  //@Get('facebook/callback')
+  //@UseGuards(FacebookAuthGuard)
+  //@ApiOperation({ summary: 'Facebook OAuth callback' })
+  //@ApiOkResponse({ type: SignInResponse })
+  //facebookCallback(@Req() req: Request) {
+  //  return this.authService.signIn(req['user'] as User);
+  //}
 
   @Post('refresh')
   @ApiOperation({ summary: 'Refresh access token using refresh token' })

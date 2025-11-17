@@ -34,6 +34,14 @@ export class PredictorService {
   ) {}
 
   private async ensureNotLocked() {
+    const allowAfterKickoff = this.configService.get(
+      'predictor.allowPredictionsAfterKickoff',
+      { infer: true },
+    );
+    if (allowAfterKickoff) {
+      return; // Skip lock check if explicitly allowed via config
+    }
+
     const seasonId = await this.getCurrentSeasonId();
     const startAt = await this.stagesService.getTournamentStartAt(seasonId);
     if (startAt && new Date() >= new Date(startAt)) {
@@ -323,9 +331,9 @@ export class PredictorService {
       const isAfcon = type.includes('afcon') || type.includes('africa cup');
       const isUcl = type.includes('ucl') || type.includes('champions league');
 
-      let pairs: { home: number; away: number }[] = [];
+      let pairIds: { home: number; away: number }[] = [];
       if (isWorldCup) {
-        pairs = this.seedingRules.buildWorldCup32Pairs(winnerMap, runnerMap);
+        pairIds = this.seedingRules.buildWorldCup32Pairs(winnerMap, runnerMap);
       } else if (isAfcon) {
         // Map thirdQualified teamIds back to their group letters, preserving order where possible
         const teamIdToGroupLetter = Object.fromEntries(
@@ -337,21 +345,49 @@ export class PredictorService {
         const thirdLetters = thirdQualified
           .map((t) => teamIdToGroupLetter[String(t)])
           .filter(Boolean) as string[];
-        pairs = this.seedingRules.buildAfcon24Pairs(
+        pairIds = this.seedingRules.buildAfcon24Pairs(
           winnerMap,
           runnerMap,
           thirdLetters,
           thirdGroupToTeamId,
         );
       } else if (isUcl) {
-        pairs = this.seedingRules.buildChampionsLeaguePairs(
+        pairIds = this.seedingRules.buildChampionsLeaguePairs(
           winnerMap,
           runnerMap,
         );
       }
 
+      // Convert team IDs to full team objects
+      const allTeamIds = [
+        ...winners,
+        ...runnersUp,
+        ...thirdQualified,
+        ...pairIds.flatMap((p) => [p.home, p.away]),
+      ];
+      const uniqueTeamIds = [...new Set(allTeamIds)];
+      const teams = await this.db.getRepository(FootballTeam).findBy({
+        id: In(uniqueTeamIds),
+      });
+      const teamMap = new Map(teams.map((t) => [t.id, t]));
+
+      const pairs = pairIds.map((p) => ({
+        home: {
+          id: p.home,
+          name: teamMap.get(p.home)?.name || '',
+          short: teamMap.get(p.home)?.short || '',
+          logo: teamMap.get(p.home)?.logo || '',
+        },
+        away: {
+          id: p.away,
+          name: teamMap.get(p.away)?.name || '',
+          short: teamMap.get(p.away)?.short || '',
+          logo: teamMap.get(p.away)?.logo || '',
+        },
+      }));
+
       const participants = pairs.length
-        ? pairs.flatMap((p) => [p.home, p.away])
+        ? pairs.flatMap((p) => [p.home.id, p.away.id])
         : [...winners, ...runnersUp, ...thirdQualified];
 
       return {
@@ -376,23 +412,70 @@ export class PredictorService {
           externalSeasonId: seasonId,
         },
         relations: ['predictedWinner'],
+        order: {
+          externalFixtureId: 'ASC', // Order by fixture ID to maintain bracket order
+        },
       });
       return preds.map((p) => p.predictedWinner.id);
     };
 
+    const getPairsForRound = async (prevRound: string) => {
+      const preds = await fixturePredRepo.find({
+        where: {
+          owner: user,
+          roundCode: prevRound,
+          externalSeasonId: seasonId,
+        },
+        relations: ['predictedWinner'],
+        order: {
+          externalFixtureId: 'ASC',
+        },
+      });
+
+      const pairs: {
+        home: { id: number; name: string; short: string; logo: string };
+        away: { id: number; name: string; short: string; logo: string };
+      }[] = [];
+      // Pair winners sequentially: (Match1 vs Match2), (Match3 vs Match4), etc.
+      for (let i = 0; i < preds.length; i += 2) {
+        if (i + 1 < preds.length) {
+          const homeTeam = preds[i].predictedWinner;
+          const awayTeam = preds[i + 1].predictedWinner;
+          pairs.push({
+            home: {
+              id: homeTeam.id,
+              name: homeTeam.name,
+              short: homeTeam.short,
+              logo: homeTeam.logo,
+            },
+            away: {
+              id: awayTeam.id,
+              name: awayTeam.name,
+              short: awayTeam.short,
+              logo: awayTeam.logo,
+            },
+          });
+        }
+      }
+      return pairs;
+    };
+
     if (roundCode === 'qf') {
       const participants = await getWinnersForRound('r16');
-      return { round: 'qf', participants };
+      const pairs = await getPairsForRound('r16');
+      return { round: 'qf', participants, pairs };
     }
 
     if (roundCode === 'sf') {
       const participants = await getWinnersForRound('qf');
-      return { round: 'sf', participants };
+      const pairs = await getPairsForRound('qf');
+      return { round: 'sf', participants, pairs };
     }
 
     if (roundCode === 'final') {
       const participants = await getWinnersForRound('sf');
-      return { round: 'final', participants };
+      const pairs = await getPairsForRound('sf');
+      return { round: 'final', participants, pairs };
     }
 
     if (roundCode === 'third-place') {
@@ -400,7 +483,7 @@ export class PredictorService {
       const sfWinners = await getWinnersForRound('sf');
       const losers = qfWinners.filter((t) => !sfWinners.includes(t));
       // In a standard bracket, losers in SF = two teams; here approximation via set difference
-      return { round: 'third-place', participants: losers };
+      return { round: 'third-place', participants: losers, pairs: [] };
     }
 
     throw new BadRequestException('Unsupported round code');

@@ -193,14 +193,14 @@ export class PredictorController {
   @ApiOperation({
     summary: 'Get seeded participants for a round',
     description:
-      "Computes participants based on prior user predictions. 'r16' includes pairs for the active competition.",
+      "Computes participants based on prior user predictions. Returns pairs for bracket rendering: 'r16' uses competition-specific seeding rules, while 'qf', 'sf', and 'final' pair winners sequentially from the previous round.",
   })
   @ApiParam({
     name: 'roundCode',
     enum: ['r16', 'qf', 'sf', 'final', 'third-place'],
   })
   @ApiOkResponse({
-    description: 'Seeded participants and pairs (if applicable)',
+    description: 'Seeded participants and pairs',
     schema: {
       example: {
         round: 'r16',
@@ -209,10 +209,16 @@ export class PredictorController {
           runnersUp: [101, 111, 121, 131, 141, 151],
           thirdQualified: [102, 112, 122, 132],
         },
-        participants: [100, 101, 120, 121],
+        participants: [100, 101, 120, 121, 130, 131, 140, 141],
         pairs: [
-          { home: 100, away: 101 },
-          { home: 120, away: 121 },
+          {
+            home: { id: 100, name: 'Team A', short: 'A', logo: 'url' },
+            away: { id: 101, name: 'Team B', short: 'B', logo: 'url' },
+          },
+          {
+            home: { id: 120, name: 'Team C', short: 'C', logo: 'url' },
+            away: { id: 121, name: 'Team D', short: 'D', logo: 'url' },
+          },
         ],
       },
     },
