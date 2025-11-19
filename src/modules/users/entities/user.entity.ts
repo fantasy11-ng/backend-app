@@ -36,6 +36,16 @@ export class User {
   @Column({ default: '' })
   refreshToken?: string;
 
+  @Column({
+    type: 'enum',
+    enum: UserRole,
+    default: UserRole.USER,
+  })
+  role!: UserRole;
+
+  @Column({ default: '' })
+  profileImageUrl?: string;
+
   @OneToMany(() => Prediction, (predtion) => predtion.owner)
   predictions?: Prediction[];
 }

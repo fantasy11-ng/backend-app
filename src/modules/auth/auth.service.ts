@@ -41,6 +41,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         isActive: user.isActive,
+        role: user.role,
       },
       accessToken,
       refreshToken,

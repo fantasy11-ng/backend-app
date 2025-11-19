@@ -16,6 +16,8 @@ import { ContentModule } from './modules/content/content.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { PredictorModule } from './modules/predictor/preditor.module';
 import { StagesModule } from './modules/stages/stages.module';
+import { BlogModule } from './modules/blog/blog.module';
+import { FilesModule } from './modules/files/files.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { StagesModule } from './modules/stages/stages.module';
     SettingsModule,
     PredictorModule,
     StagesModule,
+    BlogModule,
+    FilesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

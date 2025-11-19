@@ -34,6 +34,14 @@ export class PredictorService {
   ) {}
 
   private async ensureNotLocked() {
+    const allowAfterKickoff = this.configService.get(
+      'predictor.allowPredictionsAfterKickoff',
+      { infer: true },
+    );
+    if (allowAfterKickoff) {
+      return; // Skip lock check if explicitly allowed via config
+    }
+
     const seasonId = await this.getCurrentSeasonId();
     const startAt = await this.stagesService.getTournamentStartAt(seasonId);
     if (startAt && new Date() >= new Date(startAt)) {
@@ -61,10 +69,6 @@ export class PredictorService {
       },
     });
 
-    if (existingPrediction) {
-      throw new ForbiddenException("You've already submitted this prediction");
-    }
-
     const teams = await this.db.getRepository(FootballTeam).findBy({
       id: In(dto.teams.map((team) => team.id)),
     });
@@ -77,16 +81,26 @@ export class PredictorService {
         index: dto.teams.find((innerTeam) => innerTeam.id === team.id).index,
       };
     });
+    teamsWithGroupPosition.sort((a, b) => a.index - b.index);
 
-    if (winner.id !== teams[0].id) {
+    if (winner.id !== dto.teams[0].id) {
       throw new BadRequestException('Winner and first ranking team mismatch');
     }
-    if (runnerUp.id !== teams[1].id) {
+    if (runnerUp.id !== dto.teams[1].id) {
       throw new BadRequestException(
         'Runner Up and second ranking team mismatch',
       );
     }
 
+    if (existingPrediction) {
+      // Update existing prediction
+      existingPrediction.winner = winner;
+      existingPrediction.runnerUp = runnerUp;
+      existingPrediction.teams = teamsWithGroupPosition;
+      return predictionRepo.save(existingPrediction);
+    }
+
+    // Create new prediction
     return predictionRepo.save({
       owner: user,
       stageId: dto.stageId,
@@ -103,6 +117,7 @@ export class PredictorService {
         owner: user,
         stageId,
       },
+      relations: ['winner', 'runnerUp'],
     });
   }
 
@@ -252,9 +267,33 @@ export class PredictorService {
         }),
       ]);
 
-      // Build winners and runners-up per group from user's predictions
+      // Validate all group predictions are complete
       const groupIdToPred = new Map<number, Prediction>();
       for (const p of myPredictions) groupIdToPred.set(p.groupId, p);
+
+      const missingGroups: string[] = [];
+      for (const g of groups as Group[]) {
+        if (!groupIdToPred.has(g.id)) {
+          missingGroups.push(g.name);
+        }
+      }
+
+      if (missingGroups.length > 0) {
+        throw new BadRequestException(
+          `Please complete predictions for all groups before seeding Round of 16. Missing groups: ${missingGroups.join(', ')}`,
+        );
+      }
+
+      // Check if third place qualifiers are required
+      const numGroups = groups.length;
+      const autoQualified = numGroups * 2;
+      const thirdSlots = Math.max(0, 16 - autoQualified);
+
+      if (thirdSlots > 0 && !thirdPlaced?.ranking?.length) {
+        throw new BadRequestException(
+          `Please submit third-placed qualifiers ranking before seeding Round of 16. ${thirdSlots} third-placed team(s) needed.`,
+        );
+      }
 
       const groupsSorted = (groups as Group[])
         .slice()
@@ -274,10 +313,6 @@ export class PredictorService {
           if (ordered[2]) thirdPlacedCandidates.push(ordered[2].id);
         }
       }
-
-      const numGroups = groupsSorted.length;
-      const autoQualified = numGroups * 2;
-      const thirdSlots = Math.max(0, 16 - autoQualified);
 
       // Take user's submitted ranking to slice thirdPlaced qualifiers
       let thirdQualified: number[] = [];
@@ -323,9 +358,9 @@ export class PredictorService {
       const isAfcon = type.includes('afcon') || type.includes('africa cup');
       const isUcl = type.includes('ucl') || type.includes('champions league');
 
-      let pairs: { home: number; away: number }[] = [];
+      let pairIds: { home: number; away: number }[] = [];
       if (isWorldCup) {
-        pairs = this.seedingRules.buildWorldCup32Pairs(winnerMap, runnerMap);
+        pairIds = this.seedingRules.buildWorldCup32Pairs(winnerMap, runnerMap);
       } else if (isAfcon) {
         // Map thirdQualified teamIds back to their group letters, preserving order where possible
         const teamIdToGroupLetter = Object.fromEntries(
@@ -337,21 +372,49 @@ export class PredictorService {
         const thirdLetters = thirdQualified
           .map((t) => teamIdToGroupLetter[String(t)])
           .filter(Boolean) as string[];
-        pairs = this.seedingRules.buildAfcon24Pairs(
+        pairIds = this.seedingRules.buildAfcon24Pairs(
           winnerMap,
           runnerMap,
           thirdLetters,
           thirdGroupToTeamId,
         );
       } else if (isUcl) {
-        pairs = this.seedingRules.buildChampionsLeaguePairs(
+        pairIds = this.seedingRules.buildChampionsLeaguePairs(
           winnerMap,
           runnerMap,
         );
       }
 
+      // Convert team IDs to full team objects
+      const allTeamIds = [
+        ...winners,
+        ...runnersUp,
+        ...thirdQualified,
+        ...pairIds.flatMap((p) => [p.home, p.away]),
+      ];
+      const uniqueTeamIds = [...new Set(allTeamIds)];
+      const teams = await this.db.getRepository(FootballTeam).findBy({
+        id: In(uniqueTeamIds),
+      });
+      const teamMap = new Map(teams.map((t) => [t.id, t]));
+
+      const pairs = pairIds.map((p) => ({
+        home: {
+          id: p.home,
+          name: teamMap.get(p.home)?.name || '',
+          short: teamMap.get(p.home)?.short || '',
+          logo: teamMap.get(p.home)?.logo || '',
+        },
+        away: {
+          id: p.away,
+          name: teamMap.get(p.away)?.name || '',
+          short: teamMap.get(p.away)?.short || '',
+          logo: teamMap.get(p.away)?.logo || '',
+        },
+      }));
+
       const participants = pairs.length
-        ? pairs.flatMap((p) => [p.home, p.away])
+        ? pairs.flatMap((p) => [p.home.id, p.away.id])
         : [...winners, ...runnersUp, ...thirdQualified];
 
       return {
@@ -368,6 +431,27 @@ export class PredictorService {
 
     const fixturePredRepo = this.db.getRepository(FixturePrediction);
 
+    // Helper to validate previous round predictions are complete
+    const validatePreviousRound = async (
+      prevRound: string,
+      expectedCount: number,
+      roundName: string,
+    ) => {
+      const preds = await fixturePredRepo.find({
+        where: {
+          owner: user,
+          roundCode: prevRound,
+          externalSeasonId: seasonId,
+        },
+      });
+
+      if (preds.length < expectedCount) {
+        throw new BadRequestException(
+          `Please complete all ${roundName} predictions before seeding the next round. Expected ${expectedCount} predictions, found ${preds.length}.`,
+        );
+      }
+    };
+
     const getWinnersForRound = async (prevRound: string) => {
       const preds = await fixturePredRepo.find({
         where: {
@@ -376,31 +460,82 @@ export class PredictorService {
           externalSeasonId: seasonId,
         },
         relations: ['predictedWinner'],
+        order: {
+          externalFixtureId: 'ASC', // Order by fixture ID to maintain bracket order
+        },
       });
       return preds.map((p) => p.predictedWinner.id);
     };
 
+    const getPairsForRound = async (prevRound: string) => {
+      const preds = await fixturePredRepo.find({
+        where: {
+          owner: user,
+          roundCode: prevRound,
+          externalSeasonId: seasonId,
+        },
+        relations: ['predictedWinner'],
+        order: {
+          externalFixtureId: 'ASC',
+        },
+      });
+
+      const pairs: {
+        home: { id: number; name: string; short: string; logo: string };
+        away: { id: number; name: string; short: string; logo: string };
+      }[] = [];
+      // Pair winners sequentially: (Match1 vs Match2), (Match3 vs Match4), etc.
+      for (let i = 0; i < preds.length; i += 2) {
+        if (i + 1 < preds.length) {
+          const homeTeam = preds[i].predictedWinner;
+          const awayTeam = preds[i + 1].predictedWinner;
+          pairs.push({
+            home: {
+              id: homeTeam.id,
+              name: homeTeam.name,
+              short: homeTeam.short,
+              logo: homeTeam.logo,
+            },
+            away: {
+              id: awayTeam.id,
+              name: awayTeam.name,
+              short: awayTeam.short,
+              logo: awayTeam.logo,
+            },
+          });
+        }
+      }
+      return pairs;
+    };
+
     if (roundCode === 'qf') {
+      await validatePreviousRound('r16', 8, 'Round of 16');
       const participants = await getWinnersForRound('r16');
-      return { round: 'qf', participants };
+      const pairs = await getPairsForRound('r16');
+      return { round: 'qf', participants, pairs };
     }
 
     if (roundCode === 'sf') {
+      await validatePreviousRound('qf', 4, 'Quarter-finals');
       const participants = await getWinnersForRound('qf');
-      return { round: 'sf', participants };
+      const pairs = await getPairsForRound('qf');
+      return { round: 'sf', participants, pairs };
     }
 
     if (roundCode === 'final') {
+      await validatePreviousRound('sf', 2, 'Semi-finals');
       const participants = await getWinnersForRound('sf');
-      return { round: 'final', participants };
+      const pairs = await getPairsForRound('sf');
+      return { round: 'final', participants, pairs };
     }
 
     if (roundCode === 'third-place') {
+      await validatePreviousRound('qf', 4, 'Quarter-finals');
       const qfWinners = await getWinnersForRound('qf');
       const sfWinners = await getWinnersForRound('sf');
       const losers = qfWinners.filter((t) => !sfWinners.includes(t));
       // In a standard bracket, losers in SF = two teams; here approximation via set difference
-      return { round: 'third-place', participants: losers };
+      return { round: 'third-place', participants: losers, pairs: [] };
     }
 
     throw new BadRequestException('Unsupported round code');

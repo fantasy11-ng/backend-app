@@ -23,7 +23,7 @@ export class JwtStartegy extends PassportStrategy(Strategy) {
   async validate(payload: any) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, ...user } = await this.usersService.findOne({
-      id: payload.userId,
+      id: payload.sub,
     });
     return user;
   }
