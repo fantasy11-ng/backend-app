@@ -22,10 +22,14 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   }
 
   async validate(accessToken: string, refreshToken: string, profile: any) {
+    const email = profile.emails?.[0]?.value || profile._json?.email || '';
+    if (!email) {
+      throw new Error('Email is required but not provided by Google OAuth');
+    }
     const user = await this.usersService.findByGoogleIdOrCreateUser({
-      email: profile.email,
+      email,
       phone: '',
-      fullName: profile.displayName,
+      fullName: profile.displayName || profile.name?.givenName || '',
       googleId: profile.id,
     });
     return user;
