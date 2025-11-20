@@ -61,13 +61,28 @@ export class PredictorService {
         'Error creating prediction: invalid stage id',
       );
 
-    const existingPrediction = await predictionRepo.findOne({
+    // Ensure at most one prediction exists per (user, stage, group)
+    const existingPredictions = await predictionRepo.find({
       where: {
         owner: user,
         groupId: dto.groupId,
         stageId: dto.stageId,
       },
     });
+    let existingPrediction: Prediction | null = null;
+    if (existingPredictions.length > 1) {
+      // Keep the most recently updated prediction and remove older duplicates
+      existingPredictions.sort(
+        (a, b) => a.updatedAt.getTime() - b.updatedAt.getTime(),
+      );
+      const duplicates = existingPredictions.slice(0, -1);
+      existingPrediction = existingPredictions[existingPredictions.length - 1];
+      if (duplicates.length) {
+        await predictionRepo.remove(duplicates);
+      }
+    } else if (existingPredictions.length === 1) {
+      existingPrediction = existingPredictions[0];
+    }
 
     const teams = await this.db.getRepository(FootballTeam).findBy({
       id: In(dto.teams.map((team) => team.id)),
@@ -149,7 +164,8 @@ export class PredictorService {
         throw new BadRequestException('Invalid team in bracket prediction');
       }
 
-      const existing = await fixturePredRepo.findOne({
+      // Ensure only one prediction exists per (user, fixture, round, season)
+      const existingList = await fixturePredRepo.find({
         where: {
           owner: user,
           externalFixtureId: p.externalFixtureId,
@@ -157,6 +173,21 @@ export class PredictorService {
           externalSeasonId: seasonId,
         },
       });
+
+      let existing: FixturePrediction | null = null;
+      if (existingList.length > 1) {
+        // Keep the most recently updated prediction and remove older duplicates
+        existingList.sort(
+          (a, b) => a.updatedAt.getTime() - b.updatedAt.getTime(),
+        );
+        const duplicates = existingList.slice(0, -1);
+        existing = existingList[existingList.length - 1];
+        if (duplicates.length) {
+          await fixturePredRepo.remove(duplicates);
+        }
+      } else if (existingList.length === 1) {
+        existing = existingList[0];
+      }
 
       if (existing) {
         existing.predictedWinner = team;
@@ -180,9 +211,24 @@ export class PredictorService {
     const seasonId = await this.getCurrentSeasonId();
     const repo = this.db.getRepository(ThirdPlaceQualifiersInput);
 
-    const existing = await repo.findOne({
+    // Ensure only one record exists per (user, season)
+    const existingList = await repo.find({
       where: { owner: user, externalSeasonId: seasonId },
     });
+
+    let existing: ThirdPlaceQualifiersInput | null = null;
+    if (existingList.length > 1) {
+      existingList.sort(
+        (a, b) => a.updatedAt.getTime() - b.updatedAt.getTime(),
+      );
+      const duplicates = existingList.slice(0, -1);
+      existing = existingList[existingList.length - 1];
+      if (duplicates.length) {
+        await repo.remove(duplicates);
+      }
+    } else if (existingList.length === 1) {
+      existing = existingList[0];
+    }
 
     if (existing) {
       existing.ranking = dto.ranking;
@@ -445,7 +491,7 @@ export class PredictorService {
         },
       });
 
-      if (preds.length < expectedCount) {
+      if (preds.length !== expectedCount) {
         throw new BadRequestException(
           `Please complete all ${roundName} predictions before seeding the next round. Expected ${expectedCount} predictions, found ${preds.length}.`,
         );
@@ -531,6 +577,7 @@ export class PredictorService {
 
     if (roundCode === 'third-place') {
       await validatePreviousRound('qf', 4, 'Quarter-finals');
+      await validatePreviousRound('sf', 2, 'Semi-finals');
       const qfWinners = await getWinnersForRound('qf');
       const sfWinners = await getWinnersForRound('sf');
       const losers = qfWinners.filter((t) => !sfWinners.includes(t));
