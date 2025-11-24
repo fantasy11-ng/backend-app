@@ -40,12 +40,36 @@ export class StagesService {
     const stagesRepo = this.db.getRepository(Stage);
 
     for (const stage of stages) {
+      // Derive a more specific internal code per stage instead of relying only on type.code.
+      // Sportmonks uses "group-stage" for group phases and "knock-out" for all KO phases,
+      // so we normalize by name to distinguish r16, qf, sf, final, third-place, etc.
+      const nameLower = (stage.name || '').toLowerCase();
+      let internalCode = stage.type.code; // default fallback
+
+      if (stage.type.code === 'group-stage') {
+        internalCode = 'group-stage';
+      } else if (nameLower.includes('round of 16')) {
+        internalCode = 'round-of-16';
+      } else if (nameLower.includes('quarter') && nameLower.includes('final')) {
+        internalCode = 'quarter-finals';
+      } else if (nameLower.includes('semi') && nameLower.includes('final')) {
+        internalCode = 'semi-finals';
+      } else if (
+        (nameLower.includes('3rd') || nameLower.includes('third')) &&
+        nameLower.includes('place')
+      ) {
+        internalCode = 'third-place';
+      } else if (nameLower.includes('final')) {
+        // Plain "Final" without 3rd/semi/quarter wording
+        internalCode = 'final';
+      }
+
       await stagesRepo.save({
         id: stage.id,
         externalLeagueId: stage.league_id,
         externalSeasonId: stage.season_id,
         name: stage.name,
-        code: stage.type.code,
+        code: internalCode,
         startingAt: stage.starting_at,
         endingAt: stage.ending_at,
         finished: stage.finished,
@@ -131,23 +155,19 @@ export class StagesService {
   async syncFixtures(stages: SportmonksStage[]) {
     const fixturesRepo = this.db.getRepository(Fixture);
 
-    const serviceGroupStage = stages.find(
-      (stage) => stage.type.code === 'group-stage',
-    );
-    if (!serviceGroupStage) {
-      throw new BadGatewayException('Service Group Stage unavailable!');
-    }
-
-    for (const fx of serviceGroupStage.fixtures || []) {
-      const participantIds = (fx.participants || []).map((p) => p.id);
-      await fixturesRepo.save({
-        id: fx.id,
-        stageId: serviceGroupStage.id,
-        groupId: fx.group_id,
-        startingAt: new Date(fx.starting_at),
-        externalSeasonId: serviceGroupStage.season_id,
-        participantTeamIds: participantIds,
-      });
+    // Sync fixtures for all stages (group stage + knockout rounds)
+    for (const stage of stages) {
+      for (const fx of stage.fixtures || []) {
+        const participantIds = (fx.participants || []).map((p) => p.id);
+        await fixturesRepo.save({
+          id: fx.id,
+          stageId: stage.id,
+          groupId: fx.group_id,
+          startingAt: new Date(fx.starting_at),
+          externalSeasonId: stage.season_id,
+          participantTeamIds: participantIds,
+        });
+      }
     }
   }
 
@@ -196,5 +216,38 @@ export class StagesService {
 
   async getGroup({ id }: { id: number }) {
     return this.db.getRepository(Group).findOne({ where: { id } });
+  }
+
+  /**
+   * Get fixtures for a knockout round by internal round code and season.
+   * Round codes: 'r16' | 'qf' | 'sf' | 'final' | 'third-place'
+   */
+  async getFixturesForRound(roundCode: string, seasonId: number) {
+    const stageCodeMap: Record<string, string> = {
+      r16: 'round-of-16',
+      qf: 'quarter-finals',
+      sf: 'semi-finals',
+      final: 'final',
+      'third-place': 'third-place',
+    };
+
+    const stageCode = stageCodeMap[roundCode];
+    if (!stageCode) return [];
+
+    const stageRepo = this.db.getRepository(Stage);
+    const fixturesRepo = this.db.getRepository(Fixture);
+
+    const stage = await stageRepo.findOne({
+      where: { code: stageCode, externalSeasonId: seasonId },
+    });
+    if (!stage) return [];
+
+    return fixturesRepo.find({
+      where: { stageId: stage.id, externalSeasonId: seasonId },
+      order: {
+        startingAt: 'ASC',
+        id: 'ASC',
+      },
+    });
   }
 }

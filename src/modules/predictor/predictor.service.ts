@@ -444,7 +444,13 @@ export class PredictorService {
       });
       const teamMap = new Map(teams.map((t) => [t.id, t]));
 
-      const pairs = pairIds.map((p) => ({
+      const fixturesR16 = await this.stagesService.getFixturesForRound(
+        'r16',
+        seasonId,
+      );
+
+      const pairs = pairIds.map((p, index) => ({
+        fixtureId: fixturesR16[index]?.id ?? null,
         home: {
           id: p.home,
           name: teamMap.get(p.home)?.name || '',
@@ -558,21 +564,45 @@ export class PredictorService {
       await validatePreviousRound('r16', 8, 'Round of 16');
       const participants = await getWinnersForRound('r16');
       const pairs = await getPairsForRound('r16');
-      return { round: 'qf', participants, pairs };
+      const fixturesQf = await this.stagesService.getFixturesForRound(
+        'qf',
+        seasonId,
+      );
+      const pairsWithFixtures = pairs.map((p, index) => ({
+        fixtureId: fixturesQf[index]?.id ?? null,
+        ...p,
+      }));
+      return { round: 'qf', participants, pairs: pairsWithFixtures };
     }
 
     if (roundCode === 'sf') {
       await validatePreviousRound('qf', 4, 'Quarter-finals');
       const participants = await getWinnersForRound('qf');
       const pairs = await getPairsForRound('qf');
-      return { round: 'sf', participants, pairs };
+      const fixturesSf = await this.stagesService.getFixturesForRound(
+        'sf',
+        seasonId,
+      );
+      const pairsWithFixtures = pairs.map((p, index) => ({
+        fixtureId: fixturesSf[index]?.id ?? null,
+        ...p,
+      }));
+      return { round: 'sf', participants, pairs: pairsWithFixtures };
     }
 
     if (roundCode === 'final') {
       await validatePreviousRound('sf', 2, 'Semi-finals');
       const participants = await getWinnersForRound('sf');
       const pairs = await getPairsForRound('sf');
-      return { round: 'final', participants, pairs };
+      const fixturesFinal = await this.stagesService.getFixturesForRound(
+        'final',
+        seasonId,
+      );
+      const pairsWithFixtures = pairs.map((p, index) => ({
+        fixtureId: fixturesFinal[index]?.id ?? null,
+        ...p,
+      }));
+      return { round: 'final', participants, pairs: pairsWithFixtures };
     }
 
     if (roundCode === 'third-place') {
@@ -581,8 +611,18 @@ export class PredictorService {
       const qfWinners = await getWinnersForRound('qf');
       const sfWinners = await getWinnersForRound('sf');
       const losers = qfWinners.filter((t) => !sfWinners.includes(t));
-      // In a standard bracket, losers in SF = two teams; here approximation via set difference
-      return { round: 'third-place', participants: losers, pairs: [] };
+      const fixturesThird = await this.stagesService.getFixturesForRound(
+        'third-place',
+        seasonId,
+      );
+      const fixtureId = fixturesThird[0]?.id ?? null;
+      // In a standard bracket, losers in SF = two teams
+      return {
+        round: 'third-place',
+        participants: losers,
+        pairs: [],
+        fixtureId,
+      };
     }
 
     throw new BadRequestException('Unsupported round code');
