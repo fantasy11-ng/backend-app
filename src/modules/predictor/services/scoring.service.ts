@@ -136,32 +136,64 @@ export class PredictorScoringService {
       });
       const predictedTeamIds = predicted.map((p) => p.predictedWinner.id);
 
-      // Get actual winners from SportMonks by stage code
-      const { data: stages } =
-        await this.smStagesService.getSeasonStages(seasonId);
-      const stageCodeMap: Record<string, string> = {
-        r16: 'round-of-16',
-        qf: 'quarter-finals',
-        sf: 'semi-finals',
-        final: 'final',
-        'third-place': 'third-place',
-      };
-      const serviceStage = stages.find(
-        (s) => s.type.code === stageCodeMap[roundCode],
-      );
-      const actualWinners = new Set<number>();
-      for (const fx of serviceStage?.fixtures || []) {
-        const winner = (fx.participants || []).find((p) => p.meta?.winner);
-        if (winner) actualWinners.add(winner.id);
+      if (!predicted.length) {
+        return {
+          points: 0,
+          correct: [],
+          predicted: [],
+          actual: [],
+        };
       }
 
-      const correct = predictedTeamIds.filter((id) => actualWinners.has(id));
+      // Get actual winners from SportMonks by stage code & fixture id
+      const { data: stages } =
+        await this.smStagesService.getSeasonStages(seasonId);
+
+      // Sportmonks uses "knock-out" type for all KO stages; distinguish by name.
+      const matcherByRound: Record<string, (name: string) => boolean> = {
+        r16: (name: string) => /round of 16/i.test(name),
+        qf: (name: string) =>
+          /quarter/i.test(name) && /final/i.test(name) && !/semi/i.test(name),
+        sf: (name: string) =>
+          /semi/i.test(name) && /final/i.test(name) && !/3rd|third/i.test(name),
+        final: (name: string) =>
+          /final/i.test(name) &&
+          !/round of 16/i.test(name) &&
+          !/quarter/i.test(name) &&
+          !/semi/i.test(name) &&
+          !/3rd|third/i.test(name),
+        'third-place': (name: string) =>
+          (/3rd/i.test(name) || /third/i.test(name)) && /place/i.test(name),
+      };
+
+      const matcher = matcherByRound[roundCode];
+      const serviceStage = stages.find((s) => matcher && matcher(s.name || ''));
+      const fixtureWinnerMap = new Map<number, number | null>();
+      for (const fx of serviceStage?.fixtures || []) {
+        const winner = (fx.participants || []).find((p) => p.meta?.winner);
+        fixtureWinnerMap.set(fx.id, winner ? winner.id : null);
+      }
+
+      const correct: number[] = [];
+      const actualSet = new Set<number>();
+
+      for (const p of predicted) {
+        const predictedWinnerId = p.predictedWinner.id;
+        const actualWinnerId = fixtureWinnerMap.get(p.externalFixtureId);
+        if (actualWinnerId != null) {
+          actualSet.add(actualWinnerId);
+          if (actualWinnerId === predictedWinnerId) {
+            correct.push(predictedWinnerId);
+          }
+        }
+      }
+
       const points = correct.length * pointsPerCorrect;
       return {
         points,
         correct,
         predicted: predictedTeamIds,
-        actual: [...actualWinners],
+        actual: [...actualSet],
       };
     };
 
