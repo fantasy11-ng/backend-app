@@ -97,8 +97,8 @@ export class StagesController {
     description:
       'Admin: triggers data sync from SportMonks for the active season.',
   })
-  //@UseGuards(JwtAuthGuard, RolesGuard)
-  //@Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOkResponse({
     description: 'Sync result',
     schema: {
