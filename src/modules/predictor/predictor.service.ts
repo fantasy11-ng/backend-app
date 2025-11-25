@@ -617,10 +617,39 @@ export class PredictorService {
       );
       const fixtureId = fixturesThird[0]?.id ?? null;
       // In a standard bracket, losers in SF = two teams
+
+      // Build team objects for the two SF losers (if present) so UI can render like other rounds
+      const teamRepo = this.db.getRepository(FootballTeam);
+      const loserTeams = losers.length
+        ? await teamRepo.findBy({ id: In(losers) })
+        : [];
+      const teamMap = new Map(loserTeams.map((t) => [t.id, t]));
+
+      const pairs =
+        losers.length === 2
+          ? [
+              {
+                fixtureId,
+                home: {
+                  id: losers[0],
+                  name: teamMap.get(losers[0])?.name || '',
+                  short: teamMap.get(losers[0])?.short || '',
+                  logo: teamMap.get(losers[0])?.logo || '',
+                },
+                away: {
+                  id: losers[1],
+                  name: teamMap.get(losers[1])?.name || '',
+                  short: teamMap.get(losers[1])?.short || '',
+                  logo: teamMap.get(losers[1])?.logo || '',
+                },
+              },
+            ]
+          : [];
+
       return {
         round: 'third-place',
         participants: losers,
-        pairs: [],
+        pairs,
         fixtureId,
       };
     }
