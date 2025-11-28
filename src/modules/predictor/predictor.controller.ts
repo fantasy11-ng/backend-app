@@ -391,4 +391,26 @@ export class PredictorController {
   ) {
     return this.predictorService.predictThirdPlaceMatch(req.user as User, dto);
   }
+
+  @Get('third-place-match/me')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get my third-place match prediction',
+    description: 'Reads back the predicted winner for the third-place match.',
+  })
+  @ApiOkResponse({
+    description: 'Third-place match prediction',
+    schema: {
+      example: {
+        id: 99,
+        externalFixtureId: 9090,
+        externalSeasonId: 2026,
+        predictedWinner: { id: 333, name: 'Team Z', short: 'Z', logo: 'url' },
+      },
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  getMyThirdPlaceMatch(@Req() req: Request) {
+    return this.predictorService.getThirdPlaceMatchPrediction(req.user as User);
+  }
 }

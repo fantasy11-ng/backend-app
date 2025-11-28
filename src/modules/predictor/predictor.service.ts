@@ -274,6 +274,18 @@ export class PredictorService {
     return repo.save(tpm);
   }
 
+  async getThirdPlaceMatchPrediction(user: User) {
+    const seasonId = await this.getCurrentSeasonId();
+    const repo = this.db.getRepository(ThirdPlaceMatchPrediction);
+    return repo.findOne({
+      where: {
+        owner: user,
+        externalSeasonId: seasonId,
+      },
+      relations: ['predictedWinner'],
+    });
+  }
+
   async getGroupsWithMine(user: User) {
     const groupStage = await this.stagesService.getByCode({
       code: 'group-stage',
