@@ -23,12 +23,14 @@ import { FilesModule } from './modules/files/files.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath:
+        process.env.NODE_ENV === 'production' ? '.env.production' : '.env',
       load: [mainConfig, configurations, authConfiguration],
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      synchronize: false,
+      synchronize: true,
       entities: [User],
       autoLoadEntities: true,
       ssl: {

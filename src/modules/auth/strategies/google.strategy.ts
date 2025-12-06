@@ -13,6 +13,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   ) {
     const googleConfig = configService.get('auth.google', { infer: true });
 
+    console.log(googleConfig);
+
     super({
       clientID: googleConfig?.clientID,
       clientSecret: googleConfig?.clientSecret,

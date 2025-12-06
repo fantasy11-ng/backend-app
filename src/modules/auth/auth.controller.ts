@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -11,7 +19,7 @@ import { LocalAuthGuard } from './guards/local-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 //import { FacebookAuthGuard } from './guards/facebook-auth.guard';
 import { SignUpDto, signUpDtoSchema } from './dto/sign-up.dto';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { User } from '@/modules/users/entities/user.entity';
 import {
   RefreshAccessTokenDto,
@@ -32,6 +40,8 @@ import {
   SignInResponse,
 } from './dto/auth.responses';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { ConfigService } from '@nestjs/config';
+import { MainConfig } from '@/common/config/main.config';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -39,6 +49,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly passwordService: PasswordService,
+    private readonly configService: ConfigService<MainConfig>,
   ) {}
 
   @Post('signup')
@@ -79,8 +90,31 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Google OAuth callback' })
   @ApiOkResponse({ type: SignInResponse })
-  googleCallabck(@Req() req: Request) {
-    return this.authService.signIn(req['user'] as User);
+  async googleCallabck(@Req() req: Request, @Res() res: Response) {
+    const result = await this.authService.signIn(req['user'] as User);
+
+    const clientConfig = this.configService.get('client', { infer: true });
+    const clientBaseUrl =
+      (clientConfig && clientConfig.url) || process.env.CLIENT_URL || '';
+
+    // Fallback to localhost if CLIENT_URL is not configured
+    const base =
+      clientBaseUrl && clientBaseUrl.length > 0
+        ? clientBaseUrl
+        : 'http://localhost:5173';
+
+    const redirectUrl = new URL(
+      '/auth/google/callback',
+      base.endsWith('/') ? base : `${base}/`,
+    );
+
+    redirectUrl.searchParams.set('accessToken', result.accessToken);
+    redirectUrl.searchParams.set('refreshToken', result.refreshToken);
+    redirectUrl.searchParams.set('userId', result.user.id);
+    redirectUrl.searchParams.set('email', result.user.email);
+    redirectUrl.searchParams.set('role', result.user.role);
+
+    return res.redirect(redirectUrl.toString());
   }
 
   //@Get('facebook')
