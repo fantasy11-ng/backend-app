@@ -14,9 +14,10 @@ import {
   Paginated,
   paginate,
 } from 'nestjs-paginate';
+import { DEFAULT_PLAYER_RATING } from '@/common/football/constants/players.constants';
 
 export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
-  sortableColumns: ['id', 'name', 'pool'],
+  sortableColumns: ['id', 'name', 'pool', 'rating', 'price'],
   searchableColumns: ['name', 'commonName'],
   filterableColumns: {
     positionId: [FilterOperator.EQ],
@@ -37,9 +38,27 @@ export class PlayersService {
   async createOrUpdatePlayer(data: CreatePlayerDto) {
     const playersRepo = this.db.getRepository(Player);
 
-    const existingPlayer = playersRepo.findOne({ where: { name: data.name } });
+    const existingPlayer = await playersRepo.findOne({
+      where: { name: data.name },
+    });
 
-    return await playersRepo.save({ ...existingPlayer, ...data });
+    // Derive player price between 5M–10M based on rating
+    const rating = data.rating ?? existingPlayer?.rating ?? DEFAULT_PLAYER_RATING;
+    const minRating = 40;
+    const maxRating = 90;
+    const clamped =
+      rating < minRating ? minRating : rating > maxRating ? maxRating : rating;
+    const minPrice = 5_000_000;
+    const maxPrice = 10_000_000;
+    const t = (clamped - minRating) / (maxRating - minRating);
+    const price = Math.round(minPrice + t * (maxPrice - minPrice));
+
+    return await playersRepo.save({
+      ...existingPlayer,
+      ...data,
+      rating,
+      price,
+    });
   }
 
   async syncPlayers() {

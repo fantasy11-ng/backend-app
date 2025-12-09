@@ -1,3 +1,5 @@
+import { fantasyConfig } from './fantasy.config';
+
 export const mainConfig = () => {
   return {
     server: {
@@ -46,6 +48,7 @@ export const mainConfig = () => {
       allowPredictionsAfterKickoff:
         process.env.PREDICTOR_ALLOW_AFTER_KICKOFF === 'true',
     },
+    fantasy: fantasyConfig(),
   };
 };
 

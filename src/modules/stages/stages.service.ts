@@ -1,6 +1,5 @@
 import { BadGatewayException, Injectable } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
-import { SportmonksService } from '@/common/sportmonks/sportmonks.service';
 import { SportmonksStagesService } from '@/common/sportmonks/services/stages.service';
 import { DataSource } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -9,22 +8,30 @@ import { Stage } from './entities/stage.entity';
 import { SportmonksStage } from '@/common/sportmonks/types/stages.type';
 import { FootballTeam } from '../team/entities/football-team.entity';
 import { Fixture } from './entities/fixture.entity';
+import { SportmonksRoundsService } from '@/common/sportmonks/services/rounds.service';
+import { SportmonksRound } from '@/common/sportmonks/types/rounds.types';
+import { FantasyGameweek } from '@/modules/fantasy/entities/fantasy-gameweek.entity';
+import { FantasyGameweekPhase } from '@/modules/fantasy/fantasy.types';
+import { ConfigService } from '@nestjs/config';
+import { MainConfig } from '@/common/config/main.config';
 
 @Injectable()
 export class StagesService {
   constructor(
     private settingsService: SettingsService,
-    private sportmonksService: SportmonksService,
     private sportmonksStagesService: SportmonksStagesService,
+    private sportmonksRoundsService: SportmonksRoundsService,
+    private configService: ConfigService<MainConfig>,
     @InjectDataSource() private db: DataSource,
   ) {}
 
   async sync() {
     const mainFootballLeague =
       await this.settingsService.getMainServiceLeague();
-    const stages = await this.sportmonksStagesService.getSeasonStages(
-      mainFootballLeague.currentSeason.serviceId,
-    );
+    const seasonId = mainFootballLeague.currentSeason.serviceId;
+    const stages = await this.sportmonksStagesService.getSeasonStages(seasonId);
+    const rounds =
+      await this.sportmonksRoundsService.getRoundsBySeasonId(seasonId);
 
     if (!stages.data) {
       return 'There are currently no stages for this season';
@@ -34,6 +41,7 @@ export class StagesService {
     // Sync group and teams to reduce loops and improve perf
     await this.syncGroupsAndTeams(stages.data);
     await this.syncFixtures(stages.data);
+    await this.syncGameweeks(rounds, seasonId);
   }
 
   async syncStages(stages: SportmonksStage[]) {
@@ -163,6 +171,7 @@ export class StagesService {
           id: fx.id,
           stageId: stage.id,
           groupId: fx.group_id,
+          roundId: fx.round_id,
           startingAt: new Date(fx.starting_at),
           externalSeasonId: stage.season_id,
           participantTeamIds: participantIds,
@@ -180,6 +189,139 @@ export class StagesService {
       .limit(1);
     const first = await qb.getOne();
     return first?.startingAt ?? null;
+  }
+
+  private async syncGameweeks(
+    rounds: SportmonksRound[],
+    seasonId: number,
+  ): Promise<void> {
+    const fixturesRepo = this.db.getRepository(Fixture);
+    const gameweekRepo = this.db.getRepository(FantasyGameweek);
+
+    // Get per-round earliest kickoff time from local fixtures
+    const perRound = await fixturesRepo
+      .createQueryBuilder('f')
+      .select('f.roundId', 'roundId')
+      .addSelect('MIN(f.startingAt)', 'firstKickoffAt')
+      .where('f.externalSeasonId = :seasonId', { seasonId })
+      .andWhere('f.roundId IS NOT NULL')
+      .groupBy('f.roundId')
+      .getRawMany<{ roundId: number; firstKickoffAt: string }>();
+
+    const firstKickoffByRound = new Map<number, Date>();
+    for (const row of perRound) {
+      if (!row.roundId) continue;
+      firstKickoffByRound.set(row.roundId, new Date(row.firstKickoffAt));
+    }
+
+    const fantasyConfig = this.configService.get('fantasy', { infer: true })!;
+    const snapshotLeadMinutes = fantasyConfig.snapshotLeadMinutes ?? 120;
+
+    // Load stages to detect finals/third-place rounds
+    const stageRepo = this.db.getRepository(Stage);
+    const stages = await stageRepo.find({
+      where: { externalSeasonId: seasonId },
+    });
+    const stageById = new Map(stages.map((s) => [s.id, s]));
+
+    // Group rounds into gameweeks; finals + third-place share one gameweek
+    type GwGroup = {
+      roundIds: number[];
+      firstKickoffAt: Date;
+      seasonId: number;
+      name: string;
+      phase: 'GROUP' | 'KNOCKOUT';
+    };
+
+    const groups = new Map<string, GwGroup>();
+
+    for (const round of rounds) {
+      const firstKickoff = firstKickoffByRound.get(round.id);
+      if (!firstKickoff) continue;
+
+      const stage = stageById.get(round.stage_id);
+      const stageCode = stage?.code;
+
+      let groupKey: string;
+      const phase: 'GROUP' | 'KNOCKOUT' =
+        stageCode === 'group-stage' ? 'GROUP' : 'KNOCKOUT';
+
+      if (stageCode === 'final' || stageCode === 'third-place') {
+        groupKey = 'finals';
+      } else {
+        groupKey = `round:${round.id}`;
+      }
+
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = {
+          roundIds: [],
+          firstKickoffAt: firstKickoff,
+          seasonId: round.season_id,
+          name: round.name || String(round.id),
+          phase,
+        };
+        groups.set(groupKey, group);
+      } else if (firstKickoff < group.firstKickoffAt) {
+        group.firstKickoffAt = firstKickoff;
+      }
+
+      group.roundIds.push(round.id);
+    }
+
+    // Create/update gameweeks and map rounds to gameweekIds
+    const roundToGameweek = new Map<number, number>();
+
+    for (const [groupKey, group] of groups.entries()) {
+      const code =
+        groupKey === 'finals' ? 'finals' : `gw-${group.name || groupKey}`;
+
+      let gameweek = await gameweekRepo.findOne({
+        where: { externalSeasonId: group.seasonId, code },
+      });
+
+      const snapshotDeadline = new Date(
+        group.firstKickoffAt.getTime() - snapshotLeadMinutes * 60 * 1000,
+      );
+
+      if (!gameweek) {
+        gameweek = gameweekRepo.create({
+          code,
+          name: `Round ${group.name}`,
+          externalSeasonId: group.seasonId,
+          externalRoundId: group.roundIds[0],
+          firstKickoffAt: group.firstKickoffAt,
+          snapshotDeadlineAt: snapshotDeadline,
+          phase:
+            group.phase === 'GROUP'
+              ? FantasyGameweekPhase.GROUP
+              : FantasyGameweekPhase.KNOCKOUT,
+          isActive: false,
+        });
+      } else {
+        gameweek.firstKickoffAt = group.firstKickoffAt;
+        gameweek.snapshotDeadlineAt = snapshotDeadline;
+        gameweek.externalRoundId = group.roundIds[0];
+        gameweek.phase =
+          group.phase === 'GROUP'
+            ? FantasyGameweekPhase.GROUP
+            : FantasyGameweekPhase.KNOCKOUT;
+      }
+
+      const saved = await gameweekRepo.save(gameweek);
+
+      for (const roundId of group.roundIds) {
+        roundToGameweek.set(roundId, saved.id);
+      }
+    }
+
+    // Update fixtures with their gameweekId
+    for (const [roundId, gameweekId] of roundToGameweek.entries()) {
+      await fixturesRepo.update(
+        { externalSeasonId: seasonId, roundId },
+        { gameweekId },
+      );
+    }
   }
 
   async syncTeams(

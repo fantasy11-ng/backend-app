@@ -33,10 +33,17 @@ export class Player {
   @Column()
   countryId: number;
 
+  @Column({ nullable: true })
+  externalId?: number;
+
   @Column({ default: 45 })
   rating: number;
   @Column({ default: 0 })
   points: number;
+
+  // Transfer market price (e.g. in smallest currency unit)
+  @Column({ type: 'int', default: 0 })
+  price: number;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -12,6 +12,8 @@ import { SportmonksPlayersService } from './services/players.service';
 import { SportmonksStagesService } from './services/stages.service';
 import { SportmonksStandingsService } from './services/standings.service';
 import { SportmonksSeasonsService } from './services/seasons.service';
+import { SportmonksFixturesService } from './services/fixtures.service';
+import { SportmonksRoundsService } from './services/rounds.service';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { SportmonksSeasonsService } from './services/seasons.service';
     SportmonksStagesService,
     SportmonksStandingsService,
     SportmonksSeasonsService,
+    SportmonksFixturesService,
+    SportmonksRoundsService,
   ],
   exports: [
     SportmonksService,
@@ -49,6 +53,8 @@ import { SportmonksSeasonsService } from './services/seasons.service';
     SportmonksStagesService,
     SportmonksStandingsService,
     SportmonksSeasonsService,
+    SportmonksFixturesService,
+    SportmonksRoundsService,
   ],
 })
 export class SportmonksModule {}

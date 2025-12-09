@@ -18,6 +18,7 @@ import { PredictorModule } from './modules/predictor/preditor.module';
 import { StagesModule } from './modules/stages/stages.module';
 import { BlogModule } from './modules/blog/blog.module';
 import { FilesModule } from './modules/files/files.module';
+import { FantasyModule } from './modules/fantasy/fantasy.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { FilesModule } from './modules/files/files.module';
     StagesModule,
     BlogModule,
     FilesModule,
+    FantasyModule,
   ],
   controllers: [AppController],
   providers: [AppService],
