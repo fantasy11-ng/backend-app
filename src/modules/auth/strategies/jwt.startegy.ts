@@ -1,6 +1,6 @@
 import { MainConfig } from '@/common/config/main.config';
 import { UsersService } from '@/modules/users/users.service';
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
@@ -21,10 +21,16 @@ export class JwtStartegy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password, ...user } = await this.usersService.findOne({
+    const existingUser = await this.usersService.findOne({
       id: payload.sub,
     });
+
+    if (!existingUser) {
+      throw new UnauthorizedException();
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password, ...user } = existingUser;
     return user;
   }
 }
