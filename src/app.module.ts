@@ -31,7 +31,7 @@ import { FantasyModule } from './modules/fantasy/fantasy.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      synchronize: true,
+      synchronize: process.env.NODE_ENV === 'development',
       entities: [User],
       autoLoadEntities: true,
       ssl: {
