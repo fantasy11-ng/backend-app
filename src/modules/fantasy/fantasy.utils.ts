@@ -3,13 +3,49 @@ import { PositionCode } from './fantasy.types';
 import { FantasyConfig } from '@/common/config/fantasy.config';
 
 export function mapPlayerToPositionCode(player: Player): PositionCode {
-  const code = player.position?.code?.toUpperCase() ?? '';
+  const rawCode = player.position?.code ?? '';
+  const code = rawCode.toString().toUpperCase();
   const dev = player.position?.developer_name?.toLowerCase() ?? '';
 
-  if (code === 'G' || dev.includes('goalkeeper')) return 'GK';
-  if (code === 'D' || dev.includes('defender')) return 'DEF';
-  if (code === 'M' || dev.includes('midfielder')) return 'MID';
-  if (code === 'F' || dev.includes('forward') || dev.includes('striker'))
+  // Goalkeepers
+  if (
+    code === 'G' ||
+    code === 'GK' ||
+    code === 'GOALKEEPER' ||
+    dev.includes('goalkeeper')
+  )
+    return 'GK';
+
+  // Defenders
+  if (
+    code === 'D' ||
+    code === 'DF' ||
+    code === 'DEF' ||
+    code === 'DEFENDER' ||
+    dev.includes('defender')
+  )
+    return 'DEF';
+
+  // Midfielders
+  if (
+    code === 'M' ||
+    code === 'MF' ||
+    code === 'MID' ||
+    code === 'MIDFIELDER' ||
+    dev.includes('midfielder')
+  )
+    return 'MID';
+
+  // Forwards / Attackers
+  if (
+    code === 'F' ||
+    code === 'FW' ||
+    code === 'FWD' ||
+    code === 'ATTACKER' ||
+    dev.includes('forward') ||
+    dev.includes('striker') ||
+    dev.includes('attacker')
+  )
     return 'FWD';
 
   // Fallback: treat unknown as MID to avoid blocking

@@ -52,7 +52,7 @@ export class SportmonksPlayersService {
       ? ''
       : 'players.position;sidelined;players.player.position';
     try {
-      const { data } = await firstValueFrom(
+      const data = await firstValueFrom(
         this.http.get<SportmonksResponse<T[]>>(path, {
           params: {
             per_page: limit,
@@ -62,7 +62,7 @@ export class SportmonksPlayersService {
         }),
       );
 
-      return data;
+      return data.data;
     } catch (e) {
       throw new BadGatewayException(
         `Error getting players for season: ${seasonId}`,

@@ -32,7 +32,7 @@ import {
 } from '@nestjs/swagger';
 
 @ApiTags('Fantasy - Leagues')
-@Controller('fantasy/leagues')
+@Controller('fantasyy/leagues')
 @UseGuards(JwtAuthGuard)
 export class FantasyLeagueController {
   constructor(private readonly leaguesService: FantasyLeagueService) {}

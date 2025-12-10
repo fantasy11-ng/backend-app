@@ -43,7 +43,8 @@ export class PlayersService {
     });
 
     // Derive player price between 5M–10M based on rating
-    const rating = data.rating ?? existingPlayer?.rating ?? DEFAULT_PLAYER_RATING;
+    const rating =
+      data.rating ?? existingPlayer?.rating ?? DEFAULT_PLAYER_RATING;
     const minRating = 40;
     const maxRating = 90;
     const clamped =
@@ -79,6 +80,10 @@ export class PlayersService {
         for (const playerData of team.players) {
           if (!playerData.position_id) {
             console.error('Invalid player: no player position');
+            continue;
+          }
+          if (!playerData.player.country_id) {
+            console.log(playerData.player);
             continue;
           }
           await this.createOrUpdatePlayer({
