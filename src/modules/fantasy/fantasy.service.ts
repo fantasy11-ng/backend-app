@@ -211,17 +211,23 @@ export class FantasyService {
       }
     });
 
-    const squad = this.squadRepo.create({
-      team,
-      formation: dto.formation as FormationCode,
-      isCurrent: true,
-    });
+    // First create and persist the squad so it has an ID
+    const squad = await this.squadRepo.save(
+      this.squadRepo.create({
+        team,
+        teamId: team.id,
+        formation: dto.formation as FormationCode,
+        isCurrent: true,
+      }),
+    );
 
-    squad.players = dto.squad.map((item) => {
+    // Then create squad players with an explicit squadId
+    const squadPlayers = dto.squad.map((item) => {
       const player = players.find((p) => p.id === item.playerId)!;
       const position = mapPlayerToPositionCode(player);
       return this.squadPlayerRepo.create({
         squad,
+        squadId: squad.id,
         player,
         playerId: player.id,
         position,
@@ -233,11 +239,12 @@ export class FantasyService {
       });
     });
 
+    await this.squadPlayerRepo.save(squadPlayers);
+
     team.budgetTotal = initialBudget;
     team.budgetRemaining = initialBudget - totalCost;
 
     await this.teamRepo.save(team);
-    await this.squadRepo.save(squad);
 
     await this.eventRepo.save(
       this.eventRepo.create({
@@ -548,16 +555,19 @@ export class FantasyService {
       { isCurrent: false },
     );
 
-    const newSquad = this.squadRepo.create({
-      team,
-      teamId: team.id,
-      formation: dto.formation as FormationCode,
-      isCurrent: true,
-    });
+    const newSquad = await this.squadRepo.save(
+      this.squadRepo.create({
+        team,
+        teamId: team.id,
+        formation: dto.formation as FormationCode,
+        isCurrent: true,
+      }),
+    );
 
-    newSquad.players = baseSquad.players.map((sp) =>
+    const newSquadPlayers = baseSquad.players.map((sp) =>
       this.squadPlayerRepo.create({
         squad: newSquad,
+        squadId: newSquad.id,
         player: sp.player,
         playerId: sp.playerId,
         position: sp.position,
@@ -569,7 +579,7 @@ export class FantasyService {
       }),
     );
 
-    await this.squadRepo.save(newSquad);
+    await this.squadPlayerRepo.save(newSquadPlayers);
 
     await this.eventRepo.save(
       this.eventRepo.create({
@@ -620,16 +630,19 @@ export class FantasyService {
       { isCurrent: false },
     );
 
-    const newSquad = this.squadRepo.create({
-      team,
-      teamId: team.id,
-      formation: baseSquad.formation,
-      isCurrent: true,
-    });
+    const newSquad = await this.squadRepo.save(
+      this.squadRepo.create({
+        team,
+        teamId: team.id,
+        formation: baseSquad.formation,
+        isCurrent: true,
+      }),
+    );
 
-    newSquad.players = baseSquad.players.map((sp) =>
+    const newSquadPlayers = baseSquad.players.map((sp) =>
       this.squadPlayerRepo.create({
         squad: newSquad,
+        squadId: newSquad.id,
         player: sp.player,
         playerId: sp.playerId,
         position: sp.position,
@@ -651,7 +664,7 @@ export class FantasyService {
       }),
     );
 
-    await this.squadRepo.save(newSquad);
+    await this.squadPlayerRepo.save(newSquadPlayers);
 
     await this.eventRepo.save(
       this.eventRepo.create({
@@ -789,12 +802,14 @@ export class FantasyService {
       { isCurrent: false },
     );
 
-    const newSquad = this.squadRepo.create({
-      team,
-      teamId: team.id,
-      formation: baseSquad.formation,
-      isCurrent: true,
-    });
+    const newSquad = await this.squadRepo.save(
+      this.squadRepo.create({
+        team,
+        teamId: team.id,
+        formation: baseSquad.formation,
+        isCurrent: true,
+      }),
+    );
 
     for (const pid of keepPlayerIds) {
       const player = keepMap.get(pid)!;
@@ -804,6 +819,7 @@ export class FantasyService {
       newSquadPlayers.push(
         this.squadPlayerRepo.create({
           squad: newSquad,
+          squadId: newSquad.id,
           player,
           playerId: player.id,
           position,
@@ -816,12 +832,10 @@ export class FantasyService {
       );
     }
 
-    newSquad.players = newSquadPlayers;
-
     team.budgetRemaining = budgetRemaining;
 
     await this.teamRepo.save(team);
-    await this.squadRepo.save(newSquad);
+    await this.squadPlayerRepo.save(newSquadPlayers);
 
     await this.eventRepo.save(
       this.eventRepo.create({
