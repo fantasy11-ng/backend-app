@@ -358,7 +358,7 @@ export class FantasyService {
   }
 
   async getUpcomingFixtures(limit = 10) {
-    const now = new Date('2024-01-06');
+    const now = new Date('2024-01-06'); // TODO: remove this
     const fixtures = await this.fixtureRepo
       .createQueryBuilder('f')
       .where('f.startingAt > :now', { now })
