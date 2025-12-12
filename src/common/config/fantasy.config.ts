@@ -46,6 +46,10 @@ export const fantasyConfig = () => {
     10,
   );
 
+  // Optional "time travel" override for development/testing (e.g. AFCON historical data).
+  // If set, fantasy endpoints will use this date as "now" for queries like upcoming fixtures.
+  const nowOverrideIso = process.env.FANTASY_NOW_OVERRIDE_ISO || undefined;
+
   const formations: FormationDefinition[] = [
     {
       code: FormationCode['4-4-2'],
@@ -96,6 +100,7 @@ export const fantasyConfig = () => {
     scoring,
     transfersLocked: process.env.FANTASY_TRANSFERS_LOCKED === 'true',
     snapshotLeadMinutes,
+    nowOverrideIso,
   };
 };
 

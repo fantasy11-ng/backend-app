@@ -7,7 +7,6 @@ export const transferItemSchema = z.object({
 });
 
 export const transferRequestSchema = z.object({
-  fixtureId: z.number().optional(),
   transfers: z.array(transferItemSchema).min(1),
 });
 
@@ -22,9 +21,6 @@ class TransferItemDto {
 export class TransferRequestDto
   implements z.infer<typeof transferRequestSchema>
 {
-  @ApiProperty({ required: false })
-  fixtureId?: number;
-
   @ApiProperty({ type: () => TransferItemDto, isArray: true })
   transfers: TransferItemDto[];
 }

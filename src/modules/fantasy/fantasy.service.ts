@@ -79,11 +79,38 @@ export class FantasyService {
     }
   }
 
-  private async ensureFixtureIsEditable(fixtureId?: number) {
-    if (!fixtureId) {
-      throw new BadRequestException('fixtureId is required for this action');
+  private getNow(): Date {
+    const iso = this.fantasyConfig.nowOverrideIso;
+    if (!iso) return new Date();
+
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) {
+      // Fail safe: if misconfigured, behave like normal "now"
+      return new Date();
+    }
+    return d;
+  }
+
+  /**
+   * Clients should NOT send fixtureId for team actions.
+   * We treat the next upcoming fixture as the active one for edits/transfers.
+   */
+  private async getNextUpcomingFixtureId(): Promise<number> {
+    const now = this.getNow();
+    const next = await this.fixtureRepo
+      .createQueryBuilder('f')
+      .where('f.startingAt > :now', { now })
+      .orderBy('f.startingAt', 'ASC')
+      .getOne();
+
+    if (!next) {
+      throw new BadRequestException('No upcoming fixture available');
     }
 
+    return next.id;
+  }
+
+  private async ensureFixtureIsEditable(fixtureId: number) {
     const fixture = await this.fixturesService.getFixtureById(fixtureId, []);
 
     const kickoffMs =
@@ -94,8 +121,8 @@ export class FantasyService {
       throw new BadRequestException('Unable to determine fixture kickoff time');
     }
 
-    const now = Date.now();
-    if (now >= kickoffMs) {
+    const nowMs = this.getNow().getTime();
+    if (nowMs >= kickoffMs) {
       throw new BadRequestException(
         'Changes are not allowed after fixture has started',
       );
@@ -272,7 +299,7 @@ export class FantasyService {
       throw new BadRequestException('You must create a team first');
     }
 
-    const now = new Date();
+    const now = this.getNow();
     const gameweek = await this.gameweekRepo
       .createQueryBuilder('gw')
       .where('gw.snapshotDeadlineAt > :now', { now })
@@ -358,7 +385,7 @@ export class FantasyService {
   }
 
   async getUpcomingFixtures(limit = 10) {
-    const now = new Date('2024-01-06'); // TODO: remove this
+    const now = this.getNow();
     const fixtures = await this.fixtureRepo
       .createQueryBuilder('f')
       .where('f.startingAt > :now', { now })
@@ -496,7 +523,8 @@ export class FantasyService {
   }
 
   async updateLineup(user: User, dto: UpdateLineupDto) {
-    await this.ensureFixtureIsEditable(dto.fixtureId);
+    const fixtureId = await this.getNextUpcomingFixtureId();
+    await this.ensureFixtureIsEditable(fixtureId);
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
 
@@ -585,7 +613,8 @@ export class FantasyService {
       this.eventRepo.create({
         teamId: team.id,
         type: FantasyEventType.BENCH_SWAP,
-        payload: { startingIds, benchIds, formation: dto.formation },
+        fixtureId,
+        payload: { startingIds, benchIds, formation: dto.formation, fixtureId },
         userId: user.id,
       }),
     );
@@ -594,7 +623,8 @@ export class FantasyService {
   }
 
   async updateRoles(user: User, dto: UpdateRolesDto) {
-    await this.ensureFixtureIsEditable(dto.fixtureId);
+    const fixtureId = await this.getNextUpcomingFixtureId();
+    await this.ensureFixtureIsEditable(fixtureId);
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
 
@@ -670,7 +700,8 @@ export class FantasyService {
       this.eventRepo.create({
         teamId: team.id,
         type: FantasyEventType.ROLE_CHANGE,
-        payload: dto,
+        fixtureId,
+        payload: { ...dto, fixtureId },
         userId: user.id,
       }),
     );
@@ -683,7 +714,8 @@ export class FantasyService {
       throw new BadRequestException('Transfers are currently locked');
     }
 
-    await this.ensureFixtureIsEditable(dto.fixtureId);
+    const fixtureId = await this.getNextUpcomingFixtureId();
+    await this.ensureFixtureIsEditable(fixtureId);
 
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
@@ -774,7 +806,7 @@ export class FantasyService {
           amountIn: priceIn,
           netAmount: net,
           type: TransferType.NORMAL,
-          fixtureId: dto.fixtureId,
+          fixtureId,
           triggeredByUserId: user.id,
         }),
       );
@@ -841,7 +873,8 @@ export class FantasyService {
       this.eventRepo.create({
         teamId: team.id,
         type: FantasyEventType.TRANSFER,
-        payload: dto,
+        fixtureId,
+        payload: { ...dto, fixtureId },
         userId: user.id,
       }),
     );

@@ -6,7 +6,6 @@ export const updateRolesSchema = z.object({
   viceCaptainId: z.string().uuid().optional(),
   penaltyTakerId: z.string().uuid().optional(),
   freeKickTakerId: z.string().uuid().optional(),
-  fixtureId: z.number().optional(),
 });
 
 export class UpdateRolesDto implements z.infer<typeof updateRolesSchema> {
@@ -21,7 +20,4 @@ export class UpdateRolesDto implements z.infer<typeof updateRolesSchema> {
 
   @ApiProperty({ required: false })
   freeKickTakerId?: string;
-
-  @ApiProperty({ required: false })
-  fixtureId?: number;
 }
