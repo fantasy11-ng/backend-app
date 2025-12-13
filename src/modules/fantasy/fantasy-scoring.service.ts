@@ -91,21 +91,53 @@ export class FantasyScoringService {
     }
 
     // Performance: only load squads that actually contain players with stats,
-    // and that existed before the snapshot deadline (gameweek-based snapshot)
-    const candidateSquads = await this.squadRepo
-      .createQueryBuilder('squad')
-      .leftJoinAndSelect('squad.team', 'team')
-      .leftJoinAndSelect('squad.players', 'sp')
-      .leftJoinAndSelect('sp.player', 'player')
-      .where('squad.createdAt <= :snapshot', { snapshot: snapshotDeadline })
-      .andWhere('sp.playerId IN (:...playerIds)', { playerIds })
-      .getMany();
+    // and that are locked for the relevant gameweek. If for any reason a draft
+    // squad wasn't locked, lock it now (idempotent).
+    let candidateSquads: FantasySquad[] = [];
 
-    // For each team, pick the latest snapshot (by createdAt) at or before kickoff
+    if (gameweek) {
+      await this.squadRepo
+        .createQueryBuilder()
+        .update(FantasySquad)
+        .set({
+          isLocked: true,
+          isCurrent: false,
+          lockedAt: snapshotDeadline,
+        })
+        .where('gameweekId = :gwId', { gwId: gameweek.id })
+        .andWhere('isLocked = false')
+        .andWhere('createdAt <= :snapshot', { snapshot: snapshotDeadline })
+        .execute();
+
+      candidateSquads = await this.squadRepo
+        .createQueryBuilder('squad')
+        .leftJoinAndSelect('squad.team', 'team')
+        .leftJoinAndSelect('squad.players', 'sp')
+        .leftJoinAndSelect('sp.player', 'player')
+        .where('squad.gameweekId = :gwId', { gwId: gameweek.id })
+        .andWhere('squad.isLocked = true')
+        .andWhere('sp.playerId IN (:...playerIds)', { playerIds })
+        .getMany();
+    } else {
+      // Fallback for fixtures without a gameweekId
+      candidateSquads = await this.squadRepo
+        .createQueryBuilder('squad')
+        .leftJoinAndSelect('squad.team', 'team')
+        .leftJoinAndSelect('squad.players', 'sp')
+        .leftJoinAndSelect('sp.player', 'player')
+        .where('squad.createdAt <= :snapshot', { snapshot: snapshotDeadline })
+        .andWhere('sp.playerId IN (:...playerIds)', { playerIds })
+        .getMany();
+    }
+
+    // For each team, pick the latest eligible snapshot
     const latestSquadByTeam = new Map<string, FantasySquad>();
     for (const squad of candidateSquads) {
       const existing = latestSquadByTeam.get(squad.teamId);
-      if (!existing || squad.createdAt > existing.createdAt) {
+      const existingTs =
+        (existing?.lockedAt || existing?.createdAt)?.getTime?.() ?? 0;
+      const squadTs = (squad.lockedAt || squad.createdAt).getTime();
+      if (!existing || squadTs > existingTs) {
         latestSquadByTeam.set(squad.teamId, squad);
       }
     }

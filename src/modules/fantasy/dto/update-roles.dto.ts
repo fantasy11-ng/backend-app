@@ -2,22 +2,23 @@ import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
 export const updateRolesSchema = z.object({
-  captainId: z.string().uuid().optional(),
-  viceCaptainId: z.string().uuid().optional(),
-  penaltyTakerId: z.string().uuid().optional(),
-  freeKickTakerId: z.string().uuid().optional(),
+  // Use stable Player IDs (NOT FantasySquadPlayer IDs) so role updates work across squad snapshots
+  captainId: z.number().optional(),
+  viceCaptainId: z.number().optional(),
+  penaltyTakerId: z.number().optional(),
+  freeKickTakerId: z.number().optional(),
 });
 
 export class UpdateRolesDto implements z.infer<typeof updateRolesSchema> {
   @ApiProperty({ required: false })
-  captainId?: string;
+  captainId?: number;
 
   @ApiProperty({ required: false })
-  viceCaptainId?: string;
+  viceCaptainId?: number;
 
   @ApiProperty({ required: false })
-  penaltyTakerId?: string;
+  penaltyTakerId?: number;
 
   @ApiProperty({ required: false })
-  freeKickTakerId?: string;
+  freeKickTakerId?: number;
 }

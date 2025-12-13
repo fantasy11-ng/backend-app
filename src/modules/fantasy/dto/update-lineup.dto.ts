@@ -3,17 +3,18 @@ import { z } from 'zod';
 
 export const updateLineupSchema = z.object({
   formation: z.string(),
-  startingPlayerIds: z.array(z.string().uuid()).length(11),
-  benchPlayerIds: z.array(z.string().uuid()).length(4),
+  // Use stable Player IDs (NOT FantasySquadPlayer IDs) so lineup updates work across squad snapshots
+  startingPlayerIds: z.array(z.number()).length(11),
+  benchPlayerIds: z.array(z.number()).length(4),
 });
 
 export class UpdateLineupDto implements z.infer<typeof updateLineupSchema> {
   @ApiProperty()
   formation: string;
 
-  @ApiProperty({ type: String, isArray: true })
-  startingPlayerIds: string[];
+  @ApiProperty({ type: Number, isArray: true })
+  startingPlayerIds: number[];
 
-  @ApiProperty({ type: String, isArray: true })
-  benchPlayerIds: string[];
+  @ApiProperty({ type: Number, isArray: true })
+  benchPlayerIds: number[];
 }

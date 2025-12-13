@@ -92,41 +92,146 @@ export class FantasyService {
   }
 
   /**
-   * Clients should NOT send fixtureId for team actions.
-   * We treat the next upcoming fixture as the active one for edits/transfers.
+   * Returns the next gameweek whose snapshot deadline is still in the future.
+   * This is the gameweek the user is currently "editing towards".
    */
-  private async getNextUpcomingFixtureId(): Promise<number> {
+  private async getNextOpenGameweek(): Promise<FantasyGameweek> {
     const now = this.getNow();
-    const next = await this.fixtureRepo
-      .createQueryBuilder('f')
-      .where('f.startingAt > :now', { now })
-      .orderBy('f.startingAt', 'ASC')
+    const gw = await this.gameweekRepo
+      .createQueryBuilder('gw')
+      .where('gw.snapshotDeadlineAt > :now', { now })
+      .orderBy('gw.snapshotDeadlineAt', 'ASC')
       .getOne();
 
-    if (!next) {
-      throw new BadRequestException('No upcoming fixture available');
+    if (!gw) {
+      throw new BadRequestException('No upcoming gameweek available');
     }
 
-    return next.id;
+    return gw;
   }
 
-  private async ensureFixtureIsEditable(fixtureId: number) {
-    const fixture = await this.fixturesService.getFixtureById(fixtureId, []);
-
-    const kickoffMs =
-      (fixture.starting_at_timestamp || 0) * 1000 ||
-      Date.parse(fixture.starting_at);
-
-    if (!kickoffMs) {
-      throw new BadRequestException('Unable to determine fixture kickoff time');
-    }
-
-    const nowMs = this.getNow().getTime();
-    if (nowMs >= kickoffMs) {
+  private ensureGameweekIsEditable(gameweek: FantasyGameweek) {
+    const now = this.getNow();
+    if (now >= gameweek.snapshotDeadlineAt) {
       throw new BadRequestException(
-        'Changes are not allowed after fixture has started',
+        'Changes are not allowed after the gameweek snapshot deadline',
       );
     }
+  }
+
+  private async getGameweekFirstFixtureId(gameweekId: number) {
+    const first = await this.fixtureRepo.findOne({
+      where: { gameweekId },
+      order: { startingAt: 'ASC' },
+      select: ['id'],
+    });
+    return first?.id ?? null;
+  }
+
+  private async lockExpiredDraftSquads(teamId: string) {
+    const now = this.getNow();
+    const drafts = await this.squadRepo.find({
+      where: { teamId, isLocked: false },
+      relations: ['gameweek'],
+    });
+
+    const toLock = drafts.filter(
+      (s) =>
+        !s.isLocked &&
+        !!s.gameweekId &&
+        !!s.gameweek?.snapshotDeadlineAt &&
+        now >= s.gameweek.snapshotDeadlineAt,
+    );
+
+    for (const s of toLock) {
+      s.isLocked = true;
+      s.isCurrent = false;
+      s.lockedAt = s.gameweek!.snapshotDeadlineAt;
+      await this.squadRepo.save(s);
+    }
+  }
+
+  private async getOrCreateDraftSquadForGameweek(
+    team: FantasyTeam,
+    gameweek: FantasyGameweek,
+  ) {
+    await this.lockExpiredDraftSquads(team.id);
+
+    // Prefer an existing draft for this gameweek
+    const existing = await this.squadRepo.findOne({
+      where: { teamId: team.id, gameweekId: gameweek.id, isLocked: false },
+      relations: ['players', 'players.player'],
+    });
+    if (existing) {
+      if (!existing.isCurrent) {
+        await this.squadRepo.update(
+          { teamId: team.id, isCurrent: true },
+          { isCurrent: false },
+        );
+        existing.isCurrent = true;
+        await this.squadRepo.save(existing);
+      }
+      return existing;
+    }
+
+    // Legacy fallback: first-ever squad may have no gameweekId yet
+    const legacy = await this.squadRepo.findOne({
+      where: { teamId: team.id, isCurrent: true, gameweekId: null as any },
+      relations: ['players', 'players.player'],
+    });
+    if (legacy && !legacy.isLocked) {
+      legacy.gameweekId = gameweek.id;
+      legacy.isCurrent = true;
+      legacy.isLocked = false;
+      await this.squadRepo.save(legacy);
+      return legacy;
+    }
+
+    // Otherwise create a new draft by copying the latest known squad snapshot
+    const base = await this.squadRepo.findOne({
+      where: { teamId: team.id },
+      order: { createdAt: 'DESC' },
+      relations: ['players', 'players.player'],
+    });
+    if (!base) {
+      throw new BadRequestException('You must create a squad first');
+    }
+
+    await this.squadRepo.update(
+      { teamId: team.id, isCurrent: true },
+      { isCurrent: false },
+    );
+
+    const draft = await this.squadRepo.save(
+      this.squadRepo.create({
+        team,
+        teamId: team.id,
+        formation: base.formation,
+        gameweekId: gameweek.id,
+        isLocked: false,
+        lockedAt: null,
+        isCurrent: true,
+      }),
+    );
+
+    const players = base.players.map((sp) =>
+      this.squadPlayerRepo.create({
+        squad: draft,
+        squadId: draft.id,
+        player: sp.player,
+        playerId: sp.playerId,
+        position: sp.position,
+        isStarting: sp.isStarting,
+        isCaptain: sp.isCaptain,
+        isViceCaptain: sp.isViceCaptain,
+        isPenaltyTaker: sp.isPenaltyTaker,
+        isFreeKickTaker: sp.isFreeKickTaker,
+      }),
+    );
+    await this.squadPlayerRepo.save(players);
+
+    draft.players = players;
+    return draft;
   }
 
   async getMyTeam(user: User) {
@@ -136,7 +241,11 @@ export class FantasyService {
     });
     if (!team) throw new NotFoundException('Fantasy team not found');
 
-    const currentSquad = team.squads.find((s) => s.isCurrent);
+    const gameweek = await this.getNextOpenGameweek();
+    const currentSquad = await this.getOrCreateDraftSquadForGameweek(
+      team,
+      gameweek,
+    );
     return { team, currentSquad };
   }
 
@@ -238,12 +347,18 @@ export class FantasyService {
       }
     });
 
-    // First create and persist the squad so it has an ID
+    const gameweek = await this.getNextOpenGameweek();
+    this.ensureGameweekIsEditable(gameweek);
+
+    // Create the draft squad for the upcoming (open) gameweek
     const squad = await this.squadRepo.save(
       this.squadRepo.create({
         team,
         teamId: team.id,
         formation: dto.formation as FormationCode,
+        gameweekId: gameweek.id,
+        isLocked: false,
+        lockedAt: null,
         isCurrent: true,
       }),
     );
@@ -281,6 +396,7 @@ export class FantasyService {
         payload: {
           type: TransferType.INITIAL,
           playerIds,
+          gameweekId: gameweek.id,
         },
         userId: user.id,
       }),
@@ -465,6 +581,39 @@ export class FantasyService {
     });
     const gameweekById = new Map(gameweeks.map((gw) => [gw.id, gw]));
 
+    // Under per-gameweek snapshots, transfers are associated to the gameweek lock fixture (first fixture).
+    // Preload transfers for those lock fixtures so they appear for all fixtures in the same gameweek.
+    const gwFixtures = gameweekIds.length
+      ? await this.fixtureRepo.find({
+          where: { gameweekId: In(gameweekIds) as any },
+          order: { startingAt: 'ASC' },
+          select: ['id', 'gameweekId', 'startingAt'],
+        })
+      : [];
+    const lockFixtureIdByGameweekId = new Map<number, number>();
+    for (const f of gwFixtures) {
+      if (!f.gameweekId) continue;
+      if (!lockFixtureIdByGameweekId.has(f.gameweekId)) {
+        lockFixtureIdByGameweekId.set(f.gameweekId, f.id);
+      }
+    }
+    const lockFixtureIds = Array.from(
+      new Set(Array.from(lockFixtureIdByGameweekId.values())),
+    );
+    const transfersByLockFixtureId = new Map<number, FantasyTransfer[]>();
+    if (lockFixtureIds.length) {
+      const transfers = await this.transferRepo.find({
+        where: { teamId: team.id, fixtureId: In(lockFixtureIds) as any },
+        relations: ['playerIn', 'playerOut'],
+      });
+      for (const t of transfers) {
+        if (!t.fixtureId) continue;
+        const arr = transfersByLockFixtureId.get(t.fixtureId) || [];
+        arr.push(t);
+        transfersByLockFixtureId.set(t.fixtureId, arr);
+      }
+    }
+
     const result = [];
     let cumulative = 0;
 
@@ -486,10 +635,12 @@ export class FantasyService {
       const captainPoint = fp.find((p) => p.squadPlayer.isCaptain);
       const viceCaptainPoint = fp.find((p) => p.squadPlayer.isViceCaptain);
 
-      const transfers = await this.transferRepo.find({
-        where: { teamId: team.id, fixtureId: row.fixtureId },
-        relations: ['playerIn', 'playerOut'],
-      });
+      const lockFixtureId = row.gameweekId
+        ? (lockFixtureIdByGameweekId.get(row.gameweekId) ?? null)
+        : null;
+      const transfers = lockFixtureId
+        ? transfersByLockFixtureId.get(lockFixtureId) || []
+        : [];
 
       result.push({
         fixtureId: row.fixtureId,
@@ -523,8 +674,9 @@ export class FantasyService {
   }
 
   async updateLineup(user: User, dto: UpdateLineupDto) {
-    const fixtureId = await this.getNextUpcomingFixtureId();
-    await this.ensureFixtureIsEditable(fixtureId);
+    const gameweek = await this.getNextOpenGameweek();
+    this.ensureGameweekIsEditable(gameweek);
+    const lockFixtureId = await this.getGameweekFirstFixtureId(gameweek.id);
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
 
@@ -537,24 +689,35 @@ export class FantasyService {
 
     const formationDef = getFormationDef(this.fantasyConfig, dto.formation);
 
-    const startingIds = dto.startingPlayerIds;
-    const benchIds = dto.benchPlayerIds;
+    const startingPlayerIds = dto.startingPlayerIds;
+    const benchPlayerIds = dto.benchPlayerIds;
 
-    if (startingIds.length !== this.fantasyConfig.startingXiSize) {
+    if (startingPlayerIds.length !== this.fantasyConfig.startingXiSize) {
       throw new BadRequestException('Starting XI must have exactly 11 players');
     }
-    if (benchIds.length !== this.fantasyConfig.benchSize) {
+    if (benchPlayerIds.length !== this.fantasyConfig.benchSize) {
       throw new BadRequestException('Bench must have exactly 4 players');
     }
 
-    const allIds = [...startingIds, ...benchIds];
+    const allIds = [...startingPlayerIds, ...benchPlayerIds];
     if (allIds.length !== this.fantasyConfig.squadSize) {
       throw new BadRequestException('Lineup must include all squad players');
     }
 
     const uniqueIds = new Set(allIds);
     if (uniqueIds.size !== allIds.length) {
-      throw new BadRequestException('Duplicate squad player IDs in lineup');
+      throw new BadRequestException('Duplicate player IDs in lineup');
+    }
+
+    // Ensure provided player IDs match the squad exactly
+    const squadPlayerIds = baseSquad.players.map((sp) => sp.playerId);
+    const squadSet = new Set(squadPlayerIds);
+    for (const pid of allIds) {
+      if (!squadSet.has(pid)) {
+        throw new BadRequestException(
+          'All lineup players must be in your squad',
+        );
+      }
     }
 
     const positionCounts: Record<string, number> = {
@@ -564,7 +727,7 @@ export class FantasyService {
       FWD: 0,
     };
     for (const sp of baseSquad.players) {
-      if (startingIds.includes(sp.id)) {
+      if (startingPlayerIds.includes(sp.playerId)) {
         positionCounts[sp.position] = (positionCounts[sp.position] || 0) + 1;
       }
     }
@@ -577,44 +740,26 @@ export class FantasyService {
       }
     });
 
-    // Create a new squad snapshot for this lineup change
-    await this.squadRepo.update(
-      { teamId: team.id, isCurrent: true },
-      { isCurrent: false },
-    );
-
-    const newSquad = await this.squadRepo.save(
-      this.squadRepo.create({
-        team,
-        teamId: team.id,
-        formation: dto.formation as FormationCode,
-        isCurrent: true,
-      }),
-    );
-
-    const newSquadPlayers = baseSquad.players.map((sp) =>
-      this.squadPlayerRepo.create({
-        squad: newSquad,
-        squadId: newSquad.id,
-        player: sp.player,
-        playerId: sp.playerId,
-        position: sp.position,
-        isStarting: startingIds.includes(sp.id),
-        isCaptain: sp.isCaptain,
-        isViceCaptain: sp.isViceCaptain,
-        isPenaltyTaker: sp.isPenaltyTaker,
-        isFreeKickTaker: sp.isFreeKickTaker,
-      }),
-    );
-
-    await this.squadPlayerRepo.save(newSquadPlayers);
+    // Per-gameweek policy: update the draft squad in-place (no snapshot per change)
+    baseSquad.formation = dto.formation as FormationCode;
+    for (const sp of baseSquad.players) {
+      sp.isStarting = startingPlayerIds.includes(sp.playerId);
+    }
+    await this.squadRepo.save(baseSquad);
+    await this.squadPlayerRepo.save(baseSquad.players);
 
     await this.eventRepo.save(
       this.eventRepo.create({
         teamId: team.id,
         type: FantasyEventType.BENCH_SWAP,
-        fixtureId,
-        payload: { startingIds, benchIds, formation: dto.formation, fixtureId },
+        fixtureId: lockFixtureId ?? undefined,
+        payload: {
+          startingPlayerIds,
+          benchPlayerIds,
+          formation: dto.formation,
+          gameweekId: gameweek.id,
+          lockFixtureId,
+        },
         userId: user.id,
       }),
     );
@@ -623,14 +768,15 @@ export class FantasyService {
   }
 
   async updateRoles(user: User, dto: UpdateRolesDto) {
-    const fixtureId = await this.getNextUpcomingFixtureId();
-    await this.ensureFixtureIsEditable(fixtureId);
+    const gameweek = await this.getNextOpenGameweek();
+    this.ensureGameweekIsEditable(gameweek);
+    const lockFixtureId = await this.getGameweekFirstFixtureId(gameweek.id);
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
 
     const baseSquad = await this.squadRepo.findOne({
       where: { id: currentSquad.id },
-      relations: ['players'],
+      relations: ['players', 'players.player'],
     });
     if (!baseSquad) throw new NotFoundException('Squad not found');
 
@@ -639,7 +785,7 @@ export class FantasyService {
       dto.viceCaptainId,
       dto.penaltyTakerId,
       dto.freeKickTakerId,
-    ].filter(Boolean) as string[];
+    ].filter((v) => v !== undefined && v !== null) as number[];
     const unique = new Set(ids);
     if (unique.size !== ids.length) {
       throw new BadRequestException(
@@ -647,61 +793,35 @@ export class FantasyService {
       );
     }
 
-    const byId = new Map(baseSquad.players.map((sp) => [sp.id, sp]));
+    const byPlayerId = new Map(
+      baseSquad.players.map((sp) => [sp.playerId, sp]),
+    );
     for (const id of ids) {
-      if (!byId.has(id)) {
+      if (!byPlayerId.has(id)) {
         throw new BadRequestException('All role players must be in your squad');
       }
     }
 
-    // Create a new squad snapshot for this role change
-    await this.squadRepo.update(
-      { teamId: team.id, isCurrent: true },
-      { isCurrent: false },
-    );
-
-    const newSquad = await this.squadRepo.save(
-      this.squadRepo.create({
-        team,
-        teamId: team.id,
-        formation: baseSquad.formation,
-        isCurrent: true,
-      }),
-    );
-
-    const newSquadPlayers = baseSquad.players.map((sp) =>
-      this.squadPlayerRepo.create({
-        squad: newSquad,
-        squadId: newSquad.id,
-        player: sp.player,
-        playerId: sp.playerId,
-        position: sp.position,
-        isStarting: sp.isStarting,
-        isCaptain:
-          dto.captainId !== undefined ? sp.id === dto.captainId : sp.isCaptain,
-        isViceCaptain:
-          dto.viceCaptainId !== undefined
-            ? sp.id === dto.viceCaptainId
-            : sp.isViceCaptain,
-        isPenaltyTaker:
-          dto.penaltyTakerId !== undefined
-            ? sp.id === dto.penaltyTakerId
-            : sp.isPenaltyTaker,
-        isFreeKickTaker:
-          dto.freeKickTakerId !== undefined
-            ? sp.id === dto.freeKickTakerId
-            : sp.isFreeKickTaker,
-      }),
-    );
-
-    await this.squadPlayerRepo.save(newSquadPlayers);
+    // Per-gameweek policy: update the draft squad in-place
+    for (const sp of baseSquad.players) {
+      if (dto.captainId !== undefined) {
+        sp.isCaptain = sp.playerId === dto.captainId;
+      }
+      if (dto.viceCaptainId !== undefined)
+        sp.isViceCaptain = sp.playerId === dto.viceCaptainId;
+      if (dto.penaltyTakerId !== undefined)
+        sp.isPenaltyTaker = sp.playerId === dto.penaltyTakerId;
+      if (dto.freeKickTakerId !== undefined)
+        sp.isFreeKickTaker = sp.playerId === dto.freeKickTakerId;
+    }
+    await this.squadPlayerRepo.save(baseSquad.players);
 
     await this.eventRepo.save(
       this.eventRepo.create({
         teamId: team.id,
         type: FantasyEventType.ROLE_CHANGE,
-        fixtureId,
-        payload: { ...dto, fixtureId },
+        fixtureId: lockFixtureId ?? undefined,
+        payload: { ...dto, gameweekId: gameweek.id, lockFixtureId },
         userId: user.id,
       }),
     );
@@ -714,8 +834,9 @@ export class FantasyService {
       throw new BadRequestException('Transfers are currently locked');
     }
 
-    const fixtureId = await this.getNextUpcomingFixtureId();
-    await this.ensureFixtureIsEditable(fixtureId);
+    const gameweek = await this.getNextOpenGameweek();
+    this.ensureGameweekIsEditable(gameweek);
+    const lockFixtureId = await this.getGameweekFirstFixtureId(gameweek.id);
 
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
@@ -806,7 +927,7 @@ export class FantasyService {
           amountIn: priceIn,
           netAmount: net,
           type: TransferType.NORMAL,
-          fixtureId,
+          fixtureId: lockFixtureId ?? undefined,
           triggeredByUserId: user.id,
         }),
       );
@@ -828,21 +949,6 @@ export class FantasyService {
     );
     const newSquadPlayers: FantasySquadPlayer[] = [];
 
-    // Create a new squad snapshot for this transfer set
-    await this.squadRepo.update(
-      { teamId: team.id, isCurrent: true },
-      { isCurrent: false },
-    );
-
-    const newSquad = await this.squadRepo.save(
-      this.squadRepo.create({
-        team,
-        teamId: team.id,
-        formation: baseSquad.formation,
-        isCurrent: true,
-      }),
-    );
-
     for (const pid of keepPlayerIds) {
       const player = keepMap.get(pid)!;
       const existingSp = existingByPlayerId.get(pid);
@@ -850,8 +956,8 @@ export class FantasyService {
 
       newSquadPlayers.push(
         this.squadPlayerRepo.create({
-          squad: newSquad,
-          squadId: newSquad.id,
+          squad: baseSquad,
+          squadId: baseSquad.id,
           player,
           playerId: player.id,
           position,
@@ -867,14 +973,15 @@ export class FantasyService {
     team.budgetRemaining = budgetRemaining;
 
     await this.teamRepo.save(team);
+    await this.squadPlayerRepo.delete({ squadId: baseSquad.id });
     await this.squadPlayerRepo.save(newSquadPlayers);
 
     await this.eventRepo.save(
       this.eventRepo.create({
         teamId: team.id,
         type: FantasyEventType.TRANSFER,
-        fixtureId,
-        payload: { ...dto, fixtureId },
+        fixtureId: lockFixtureId ?? undefined,
+        payload: { ...dto, gameweekId: gameweek.id, lockFixtureId },
         userId: user.id,
       }),
     );

@@ -10,6 +10,7 @@ import {
 import { FantasyTeam } from './fantasy-team.entity';
 import { FantasySquadPlayer } from './fantasy-squad-player.entity';
 import { FormationCode } from '@/common/config/fantasy.config';
+import { FantasyGameweek } from './fantasy-gameweek.entity';
 
 @Entity()
 export class FantasySquad {
@@ -25,6 +26,23 @@ export class FantasySquad {
 
   @Column({ type: 'varchar' })
   formation: FormationCode;
+
+  /**
+   * The gameweek this squad applies to (draft until locked).
+   * Once locked, all fixtures in this gameweek use this frozen snapshot.
+   */
+  @ManyToOne(() => FantasyGameweek, { nullable: true })
+  @JoinColumn({ name: 'gameweekId' })
+  gameweek?: FantasyGameweek | null;
+
+  @Column({ nullable: true })
+  gameweekId?: number | null;
+
+  @Column({ default: false })
+  isLocked: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  lockedAt?: Date | null;
 
   @Column({ default: true })
   isCurrent: boolean;
