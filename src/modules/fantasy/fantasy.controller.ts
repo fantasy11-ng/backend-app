@@ -281,6 +281,44 @@ export class FantasyController {
     return this.fantasyService.getHistory(req.user as User);
   }
 
+  @Get('leaderboard/season')
+  @ApiOperation({
+    summary: 'Get season leaderboard',
+    description:
+      "Returns precomputed season-long fantasy rankings for all teams. Results are paginated and ordered by total points (highest first). Includes the authenticated user's position in the leaderboard.",
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Number of items per page (default: 50)',
+    example: 50,
+  })
+  @ApiOkResponse({
+    description: 'Season leaderboard with pagination metadata',
+    type: FantasyRankingListResponseDto,
+  })
+  async getSeasonLeaderboard(
+    @Req() req: Request,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedPage = page ? parseInt(page, 10) || 1 : 1;
+    const parsedLimit = limit ? parseInt(limit, 10) || 50 : 50;
+    return this.fantasyService.getSeasonLeaderboard(
+      req.user as User,
+      parsedPage,
+      parsedLimit,
+    );
+  }
+
   @Get('leaderboard/:fixtureId')
   @ApiOperation({
     summary: 'Get fixture leaderboard',
@@ -321,44 +359,6 @@ export class FantasyController {
     const parsedLimit = limit ? parseInt(limit, 10) || 50 : 50;
     return this.fantasyService.getLeaderboard(
       fixtureId,
-      req.user as User,
-      parsedPage,
-      parsedLimit,
-    );
-  }
-
-  @Get('leaderboard/season')
-  @ApiOperation({
-    summary: 'Get season leaderboard',
-    description:
-      "Returns precomputed season-long fantasy rankings for all teams. Results are paginated and ordered by total points (highest first). Includes the authenticated user's position in the leaderboard.",
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Page number (default: 1)',
-    example: 1,
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Number of items per page (default: 50)',
-    example: 50,
-  })
-  @ApiOkResponse({
-    description: 'Season leaderboard with pagination metadata',
-    type: FantasyRankingListResponseDto,
-  })
-  async getSeasonLeaderboard(
-    @Req() req: Request,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
-    const parsedPage = page ? parseInt(page, 10) || 1 : 1;
-    const parsedLimit = limit ? parseInt(limit, 10) || 50 : 50;
-    return this.fantasyService.getSeasonLeaderboard(
       req.user as User,
       parsedPage,
       parsedLimit,
