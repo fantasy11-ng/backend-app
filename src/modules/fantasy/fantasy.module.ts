@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { Injectable, Logger, Module, OnModuleInit } from '@nestjs/common';
+import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
+import { DataSource } from 'typeorm';
 import { FantasyTeam } from './entities/fantasy-team.entity';
 import { FantasySquad } from './entities/fantasy-squad.entity';
 import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
@@ -24,6 +25,61 @@ import { FantasyLeague } from './entities/fantasy-league.entity';
 import { FantasyLeagueMembership } from './entities/fantasy-league-membership.entity';
 import { FantasyLeagueService } from './fantasy-league.service';
 import { FantasyLeagueController } from './fantasy-league.controller';
+
+/**
+ * Lightweight, idempotent schema guard for Fantasy tables.
+ *
+ * The project currently relies on TypeORM synchronize in non-prod and does not
+ * ship migrations. If the app boots with synchronize=false against a DB that
+ * is missing newer columns, TypeORM will generate queries that reference
+ * non-existent columns (e.g. FantasySquad.gameweekId) and endpoints will crash.
+ */
+@Injectable()
+class FantasySchemaInitService implements OnModuleInit {
+  private readonly logger = new Logger(FantasySchemaInitService.name);
+
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  async onModuleInit() {
+    // Only run for Postgres; safe no-op for other drivers.
+    if (this.dataSource.options.type !== 'postgres') return;
+
+    // Best-effort: schema guard must never prevent app startup.
+    try {
+      // Column is referenced by the FantasySquad entity and used in multiple
+      // code paths; without it, many queries will throw at runtime.
+      await this.dataSource.query(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'fantasy_squad'
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'fantasy_squad'
+      AND column_name = 'gameweekId'
+  ) THEN
+    ALTER TABLE "fantasy_squad" ADD COLUMN "gameweekId" integer;
+  END IF;
+END $$;
+      `);
+
+      // Index is optional but helps common lookups.
+      await this.dataSource.query(`
+CREATE INDEX IF NOT EXISTS "IDX_fantasy_squad_gameweekId"
+  ON "fantasy_squad" ("gameweekId");
+      `);
+    } catch (e) {
+      this.logger.warn(
+        `Fantasy schema guard skipped/failed: ${(e as Error)?.message ?? e}`,
+      );
+    }
+  }
+}
 
 @Module({
   imports: [
@@ -52,6 +108,7 @@ import { FantasyLeagueController } from './fantasy-league.controller';
     FantasyService,
     FantasyScoringService,
     FantasyLeagueService,
+    FantasySchemaInitService,
     SportmonksMatchStatsProvider,
     {
       provide: MATCH_STATS_PROVIDER,

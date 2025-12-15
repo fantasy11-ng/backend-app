@@ -780,23 +780,44 @@ export class FantasyService {
     });
     if (!baseSquad) throw new NotFoundException('Squad not found');
 
-    const ids = [
-      dto.captainId,
-      dto.viceCaptainId,
-      dto.penaltyTakerId,
-      dto.freeKickTakerId,
-    ].filter((v) => v !== undefined && v !== null) as number[];
-    const unique = new Set(ids);
-    if (unique.size !== ids.length) {
-      throw new BadRequestException(
-        'A player cannot hold multiple roles simultaneously',
-      );
-    }
-
     const byPlayerId = new Map(
       baseSquad.players.map((sp) => [sp.playerId, sp]),
     );
-    for (const id of ids) {
+
+    // Get current captain and vice-captain from existing squad
+    const currentCaptain = baseSquad.players.find((sp) => sp.isCaptain);
+    const currentViceCaptain = baseSquad.players.find((sp) => sp.isViceCaptain);
+
+    // Determine final captain and vice-captain values (DTO takes precedence, fallback to existing)
+    const finalCaptainId =
+      dto.captainId !== undefined ? dto.captainId : currentCaptain?.playerId;
+    const finalViceCaptainId =
+      dto.viceCaptainId !== undefined
+        ? dto.viceCaptainId
+        : currentViceCaptain?.playerId;
+
+    // Validate: captain and vice-captain must be different players
+    // Note: A player CAN be both penalty taker and free kick taker
+    if (
+      finalCaptainId !== undefined &&
+      finalViceCaptainId !== undefined &&
+      finalCaptainId === finalViceCaptainId
+    ) {
+      throw new BadRequestException(
+        'Captain and vice-captain must be different players',
+      );
+    }
+
+    // Validate all role players are in the squad (using Set to handle duplicates)
+    const rolePlayerIds = new Set(
+      [
+        dto.captainId,
+        dto.viceCaptainId,
+        dto.penaltyTakerId,
+        dto.freeKickTakerId,
+      ].filter((v) => v !== undefined && v !== null) as number[],
+    );
+    for (const id of rolePlayerIds) {
       if (!byPlayerId.has(id)) {
         throw new BadRequestException('All role players must be in your squad');
       }

@@ -31,9 +31,16 @@ import { FantasyModule } from './modules/fantasy/fantasy.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      synchronize: process.env.NODE_ENV === 'development',
+      // Default to syncing schema outside production, unless explicitly overridden.
+      // This project does not currently ship migrations, so skipping sync in dev
+      // easily leads to runtime "column does not exist" errors.
+      synchronize:
+        process.env.TYPEORM_SYNCHRONIZE != null
+          ? process.env.TYPEORM_SYNCHRONIZE === 'true'
+          : process.env.NODE_ENV !== 'production',
       entities: [User],
       autoLoadEntities: true,
+      logging: true,
       ssl: {
         rejectUnauthorized: false,
       },
