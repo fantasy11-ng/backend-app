@@ -38,9 +38,23 @@ export class PlayersService {
   async createOrUpdatePlayer(data: CreatePlayerDto) {
     const playersRepo = this.db.getRepository(Player);
 
-    const existingPlayer = await playersRepo.findOne({
-      where: { name: data.name },
-    });
+    // IMPORTANT:
+    // - `externalId` should be the SportMonks **player** id (stable)
+    // - do NOT upsert by name; names are not unique and can cause duplicates
+    let existingPlayer: Player | null = null;
+
+    if (data.externalId != null) {
+      existingPlayer = await playersRepo.findOne({
+        where: { externalId: data.externalId },
+      });
+    }
+
+    // Fallback for legacy rows created before externalId was correct.
+    if (!existingPlayer) {
+      existingPlayer = await playersRepo.findOne({
+        where: { name: data.name },
+      });
+    }
 
     // Derive player price between 5M–10M based on rating
     const rating =
@@ -82,12 +96,20 @@ export class PlayersService {
             console.error('Invalid player: no player position');
             continue;
           }
+          // SportMonks team squad items have their own id (row id) and a `player_id` which
+          // is the stable SportMonks player id. We must persist the player id.
+          const sportmonksPlayerId =
+            (playerData as any).player_id ?? playerData.player?.id;
+          if (!sportmonksPlayerId) {
+            console.error('Invalid player: no sportmonks player_id');
+            continue;
+          }
           if (!playerData.player.country_id) {
             console.log(playerData.player);
             continue;
           }
           await this.createOrUpdatePlayer({
-            externalId: playerData.id,
+            externalId: sportmonksPlayerId,
             image: playerData.player.image_path,
             name: playerData.player.name,
             commonName: playerData.player.common_name,

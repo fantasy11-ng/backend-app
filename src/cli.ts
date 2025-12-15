@@ -7,14 +7,28 @@ import { User } from './modules/users/entities/user.entity';
 import { PostEntity } from './modules/blog/entities/post.entity';
 import { Category } from './modules/blog/entities/category.entity';
 import { Tag } from './modules/blog/entities/tag.entity';
+import { Player } from './modules/players/entities/player.entity';
+import { FantasySquadPlayer } from './modules/fantasy/entities/fantasy-squad-player.entity';
+import { FantasyTransfer } from './modules/fantasy/entities/fantasy-transfer.entity';
+import { PlayerFixtureStats } from './modules/players/entities/player-fixture-stats.entity';
+import { DedupePlayersCommand } from '@/scripts/dedupe-players';
 
 @Module({
   imports: [
     AppModule,
     // Ensure repositories are available for the command
-    TypeOrmModule.forFeature([User, PostEntity, Category, Tag]),
+    TypeOrmModule.forFeature([
+      User,
+      PostEntity,
+      Category,
+      Tag,
+      Player,
+      PlayerFixtureStats,
+      FantasySquadPlayer,
+      FantasyTransfer,
+    ]),
   ],
-  providers: [SeedAfconBlogCommand],
+  providers: [SeedAfconBlogCommand, DedupePlayersCommand],
 })
 export class CliModule {}
 

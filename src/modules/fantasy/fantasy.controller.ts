@@ -33,6 +33,7 @@ import {
   MyTeamResponseDto,
   SimpleMessageResponseDto,
   ApplyBoostResponseDto,
+  GetBoostsResponseDto,
   UpcomingFixtureDto,
   FixturePerformanceItemDto,
   TeamHistoryResponseDto,
@@ -50,7 +51,6 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import { FantasyBoost } from './entities/fantasy-boost.entity';
 import { FantasyTransfer } from './entities/fantasy-transfer.entity';
 
 @ApiTags('Fantasy')
@@ -197,7 +197,7 @@ export class FantasyController {
   })
   @ApiOkResponse({
     description: 'List of boosts applied by the user',
-    type: [FantasyBoost],
+    type: GetBoostsResponseDto,
   })
   async getBoosts(@Req() req: Request) {
     return this.fantasyService.getBoosts(req.user as User);

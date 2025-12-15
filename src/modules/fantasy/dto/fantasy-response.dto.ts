@@ -32,6 +32,14 @@ export class ApplyBoostResponseDto extends SimpleMessageResponseDto {
   gameweekId: number;
 }
 
+export class GetBoostsResponseDto {
+  @ApiProperty({ enum: FantasyBoostType, isArray: true })
+  availableBoosts: FantasyBoostType[];
+
+  @ApiProperty({ type: FantasyBoost, isArray: true })
+  boosts: FantasyBoost[];
+}
+
 export class MyTeamResponseDto {
   @ApiProperty({ type: FantasyTeam })
   team: FantasyTeam;

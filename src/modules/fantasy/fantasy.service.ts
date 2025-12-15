@@ -241,6 +241,12 @@ export class FantasyService {
     });
     if (!team) throw new NotFoundException('Fantasy team not found');
 
+    // If the team exists but the user hasn't created an initial squad yet,
+    // return the team and let the client prompt squad creation.
+    if (!team.squads?.length) {
+      return { team, currentSquad: null };
+    }
+
     const gameweek = await this.getNextOpenGameweek();
     const currentSquad = await this.getOrCreateDraftSquadForGameweek(
       team,
@@ -283,13 +289,6 @@ export class FantasyService {
     });
     if (!team) {
       throw new BadRequestException('You must create a team first');
-    }
-
-    const hasSquad = await this.squadRepo.count({
-      where: { teamId: team.id },
-    });
-    if (hasSquad > 0) {
-      throw new BadRequestException('You already have a fantasy squad');
     }
 
     const formationDef = getFormationDef(this.fantasyConfig, dto.formation);
@@ -350,57 +349,81 @@ export class FantasyService {
     const gameweek = await this.getNextOpenGameweek();
     this.ensureGameweekIsEditable(gameweek);
 
-    // Create the draft squad for the upcoming (open) gameweek
-    const squad = await this.squadRepo.save(
-      this.squadRepo.create({
-        team,
-        teamId: team.id,
-        formation: dto.formation as FormationCode,
-        gameweekId: gameweek.id,
-        isLocked: false,
-        lockedAt: null,
-        isCurrent: true,
-      }),
-    );
+    // Make the entire operation transactional to avoid partial writes:
+    // - if any step fails, we don't leave an orphan squad behind
+    // - if an orphan squad exists from a previous failed attempt, we clean it up
+    await this.teamRepo.manager.transaction(async (em) => {
+      const teamRepo = em.getRepository(FantasyTeam);
+      const squadRepo = em.getRepository(FantasySquad);
+      const squadPlayerRepo = em.getRepository(FantasySquadPlayer);
+      const eventRepo = em.getRepository(FantasyTeamEvent);
 
-    // Then create squad players with an explicit squadId
-    const squadPlayers = dto.squad.map((item) => {
-      const player = players.find((p) => p.id === item.playerId)!;
-      const position = mapPlayerToPositionCode(player);
-      return this.squadPlayerRepo.create({
-        squad,
-        squadId: squad.id,
-        player,
-        playerId: player.id,
-        position,
-        isStarting: item.isStarting,
-        isCaptain: item.isCaptain ?? false,
-        isViceCaptain: item.isViceCaptain ?? false,
-        isPenaltyTaker: item.isPenaltyTaker ?? false,
-        isFreeKickTaker: item.isFreeKickTaker ?? false,
+      const existingSquads = await squadRepo.find({
+        where: { teamId: team.id },
+        relations: ['players'],
       });
-    });
 
-    await this.squadPlayerRepo.save(squadPlayers);
+      if (existingSquads.length) {
+        const hasRealSquad = existingSquads.some(
+          (s) => (s.players?.length ?? 0) > 0,
+        );
 
-    team.budgetTotal = initialBudget;
-    team.budgetRemaining = initialBudget - totalCost;
+        if (hasRealSquad) {
+          throw new BadRequestException('You already have a fantasy squad');
+        }
 
-    await this.teamRepo.save(team);
+        // Self-heal: delete orphan squads (typically created by a previous failed request)
+        await squadRepo.remove(existingSquads);
+      }
 
-    await this.eventRepo.save(
-      this.eventRepo.create({
-        team,
-        teamId: team.id,
-        type: FantasyEventType.TRANSFER,
-        payload: {
-          type: TransferType.INITIAL,
-          playerIds,
+      // Create the draft squad for the upcoming (open) gameweek
+      const squad = await squadRepo.save(
+        squadRepo.create({
+          teamId: team.id,
+          formation: dto.formation as FormationCode,
           gameweekId: gameweek.id,
-        },
-        userId: user.id,
-      }),
-    );
+          isLocked: false,
+          lockedAt: null,
+          isCurrent: true,
+        }),
+      );
+
+      // Then create squad players with an explicit squadId
+      const squadPlayers = dto.squad.map((item) => {
+        const player = players.find((p) => p.id === item.playerId)!;
+        const position = mapPlayerToPositionCode(player);
+        return squadPlayerRepo.create({
+          squadId: squad.id,
+          playerId: player.id,
+          position,
+          isStarting: item.isStarting,
+          isCaptain: item.isCaptain ?? false,
+          isViceCaptain: item.isViceCaptain ?? false,
+          isPenaltyTaker: item.isPenaltyTaker ?? false,
+          isFreeKickTaker: item.isFreeKickTaker ?? false,
+        });
+      });
+
+      await squadPlayerRepo.save(squadPlayers);
+
+      await teamRepo.update(team.id, {
+        budgetTotal: initialBudget,
+        budgetRemaining: initialBudget - totalCost,
+      });
+
+      await eventRepo.save(
+        eventRepo.create({
+          teamId: team.id,
+          type: FantasyEventType.TRANSFER,
+          payload: {
+            type: TransferType.INITIAL,
+            playerIds,
+            gameweekId: gameweek.id,
+          },
+          userId: user.id,
+        }),
+      );
+    });
 
     return {
       message: 'Your fantasy squad has been created',
@@ -497,7 +520,10 @@ export class FantasyService {
       order: { createdAt: 'DESC' },
     });
 
-    return boosts;
+    return {
+      availableBoosts: Object.values(FantasyBoostType),
+      boosts,
+    };
   }
 
   async getUpcomingFixtures(limit = 10) {

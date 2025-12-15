@@ -20,6 +20,10 @@ import { FantasyGameweek } from './entities/fantasy-gameweek.entity';
 import { FantasyBoost } from './entities/fantasy-boost.entity';
 import { FantasyBoostType } from './fantasy.types';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { Player } from '@/modules/players/entities/player.entity';
+import { PlayerFixtureStats } from '@/modules/players/entities/player-fixture-stats.entity';
 
 @Injectable()
 export class FantasyScoringService {
@@ -46,6 +50,7 @@ export class FantasyScoringService {
     @Inject(MATCH_STATS_PROVIDER)
     private readonly statsProvider: MatchStatsProvider,
     private readonly fixturesService: SportmonksFixturesService,
+    @InjectDataSource() private readonly db: DataSource,
   ) {
     this.fantasyConfig = this.configService.get('fantasy', { infer: true })!;
   }
@@ -76,6 +81,9 @@ export class FantasyScoringService {
 
     const stats = await this.statsProvider.getStatsForFixture(fixtureId);
     if (!stats.length) return;
+
+    // Keep global player stats up-to-date (idempotent via per-fixture upsert)
+    await this.upsertPlayerFixtureStatsAndUpdatePlayerTotals(fixtureId, stats);
 
     const statsByPlayerId = new Map<number, PlayerMatchStats>();
     const playerIds: number[] = [];
@@ -467,5 +475,94 @@ export class FantasyScoringService {
     }
 
     return points;
+  }
+
+  private toFantasyPositionCode(p: Player): PositionCode {
+    const code = (p.position?.code || '').trim().toUpperCase();
+    if (code === 'G') return 'GK';
+    if (code === 'D') return 'DEF';
+    if (code === 'M') return 'MID';
+    if (code === 'F') return 'FWD';
+
+    const dev = (p.position?.developer_name || '').trim().toUpperCase();
+    if (dev.includes('GOALKEEPER')) return 'GK';
+    if (dev.includes('DEFENDER')) return 'DEF';
+    if (dev.includes('MIDFIELDER')) return 'MID';
+    if (dev.includes('FORWARD') || dev.includes('ATTACKER')) return 'FWD';
+
+    // Safe default
+    return 'MID';
+  }
+
+  /**
+   * Upsert per-player-per-fixture stats, then aggregate into Player row.
+   * This makes re-scoring a fixture idempotent for player stats.
+   */
+  private async upsertPlayerFixtureStatsAndUpdatePlayerTotals(
+    fixtureId: number,
+    stats: PlayerMatchStats[],
+  ) {
+    const playerIds = Array.from(new Set(stats.map((s) => s.playerId)));
+    if (!playerIds.length) return;
+
+    const playerRepo = this.db.getRepository(Player);
+    const pfsRepo = this.db.getRepository(PlayerFixtureStats);
+
+    const players = await playerRepo.find({
+      where: { id: In(playerIds) as any },
+      select: ['id', 'position'],
+    });
+    const playerById = new Map(players.map((p) => [p.id, p]));
+
+    const rows = stats.map((s) => {
+      const p = playerById.get(s.playerId);
+      const pos = p ? this.toFantasyPositionCode(p) : ('MID' as PositionCode);
+      const basePoints = this.calculateBasePoints(pos, s);
+      const bonusPoints = this.calculateBonusPoints(s);
+
+      return pfsRepo.create({
+        playerId: s.playerId,
+        fixtureId,
+        minutesPlayed: s.minutesPlayed || 0,
+        goals: s.goals || 0,
+        assists: s.assists || 0,
+        yellowCards: s.yellowCards || 0,
+        redCards: s.redCards || 0,
+        fantasyPoints: basePoints + bonusPoints,
+      });
+    });
+
+    // Idempotent per fixture
+    await pfsRepo.upsert(rows, ['playerId', 'fixtureId']);
+
+    // Aggregate totals for affected players only
+    const agg = await pfsRepo
+      .createQueryBuilder('pfs')
+      .select('pfs.playerId', 'playerId')
+      .addSelect('COALESCE(SUM(pfs.goals), 0)', 'goals')
+      .addSelect('COALESCE(SUM(pfs.assists), 0)', 'assists')
+      .addSelect('COALESCE(SUM(pfs.yellowCards), 0)', 'yellowCards')
+      .addSelect('COALESCE(SUM(pfs.redCards), 0)', 'redCards')
+      .addSelect('COALESCE(SUM(pfs.fantasyPoints), 0)', 'points')
+      .where('pfs.playerId IN (:...playerIds)', { playerIds })
+      .groupBy('pfs.playerId')
+      .getRawMany<{
+        playerId: string;
+        goals: string;
+        assists: string;
+        yellowCards: string;
+        redCards: string;
+        points: string;
+      }>();
+
+    for (const row of agg) {
+      await playerRepo.update(Number(row.playerId), {
+        goals: Number(row.goals) || 0,
+        assists: Number(row.assists) || 0,
+        yellowCards: Number(row.yellowCards) || 0,
+        redCards: Number(row.redCards) || 0,
+        points: Number(row.points) || 0,
+      });
+    }
   }
 }
