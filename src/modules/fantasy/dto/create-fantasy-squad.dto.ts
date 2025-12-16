@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
-import { FormationCode } from '@/common/config/fantasy.config';
 
 export const createFantasySquadSchema = z.object({
   formation: z.string(),
@@ -41,8 +40,11 @@ class SquadPlayerDto {
 export class CreateFantasySquadDto
   implements z.infer<typeof createFantasySquadSchema>
 {
-  @ApiProperty({ enum: Object.values(FormationCode) })
-  formation: FormationCode;
+  @ApiProperty({
+    description: 'Any valid football formation string (GK is implied).',
+    examples: ['4-4-2', '4-2-3-1', '3-4-3'],
+  })
+  formation: string;
 
   @ApiProperty({ type: () => SquadPlayerDto, isArray: true })
   squad: SquadPlayerDto[];

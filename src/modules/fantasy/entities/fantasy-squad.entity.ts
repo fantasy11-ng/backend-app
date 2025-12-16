@@ -9,7 +9,6 @@ import {
 } from 'typeorm';
 import { FantasyTeam } from './fantasy-team.entity';
 import { FantasySquadPlayer } from './fantasy-squad-player.entity';
-import { FormationCode } from '@/common/config/fantasy.config';
 import { FantasyGameweek } from './fantasy-gameweek.entity';
 
 @Entity()
@@ -25,7 +24,7 @@ export class FantasySquad {
   teamId: string;
 
   @Column({ type: 'varchar' })
-  formation: FormationCode;
+  formation: string;
 
   /**
    * The gameweek this squad applies to (draft until locked).

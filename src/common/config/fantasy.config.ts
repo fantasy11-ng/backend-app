@@ -1,15 +1,7 @@
 import { PositionCode } from '@/modules/fantasy/fantasy.types';
 
-export enum FormationCode {
-  '4-4-2' = '4-4-2',
-  '4-3-3' = '4-3-3',
-  '3-5-2' = '3-5-2',
-  '3-4-3' = '3-4-3',
-  '5-3-2' = '5-3-2',
-}
-
 export interface FormationDefinition {
-  code: FormationCode;
+  code: string;
   positions: Record<PositionCode, number>;
 }
 
@@ -50,29 +42,6 @@ export const fantasyConfig = () => {
   // If set, fantasy endpoints will use this date as "now" for queries like upcoming fixtures.
   const nowOverrideIso = process.env.FANTASY_NOW_OVERRIDE_ISO || undefined;
 
-  const formations: FormationDefinition[] = [
-    {
-      code: FormationCode['4-4-2'],
-      positions: { GK: 1, DEF: 4, MID: 4, FWD: 2 },
-    },
-    {
-      code: FormationCode['4-3-3'],
-      positions: { GK: 1, DEF: 4, MID: 3, FWD: 3 },
-    },
-    {
-      code: FormationCode['3-5-2'],
-      positions: { GK: 1, DEF: 3, MID: 5, FWD: 2 },
-    },
-    {
-      code: FormationCode['3-4-3'],
-      positions: { GK: 1, DEF: 3, MID: 4, FWD: 3 },
-    },
-    {
-      code: FormationCode['5-3-2'],
-      positions: { GK: 1, DEF: 5, MID: 3, FWD: 2 },
-    },
-  ];
-
   const scoring: ScoringConfig = {
     goal: 5,
     assist: 3,
@@ -96,7 +65,6 @@ export const fantasyConfig = () => {
     squadSize: 15,
     startingXiSize: 11,
     benchSize: 4,
-    formations,
     scoring,
     transfersLocked: process.env.FANTASY_TRANSFERS_LOCKED === 'true',
     snapshotLeadMinutes,

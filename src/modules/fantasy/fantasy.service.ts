@@ -18,8 +18,8 @@ import { Player } from '@/modules/players/entities/player.entity';
 import { PlayersService } from '@/modules/players/players.service';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
-import { FantasyConfig, FormationCode } from '@/common/config/fantasy.config';
-import { mapPlayerToPositionCode, getFormationDef } from './fantasy.utils';
+import { FantasyConfig } from '@/common/config/fantasy.config';
+import { mapPlayerToPositionCode, parseFormation } from './fantasy.utils';
 import {
   FantasyBoostType,
   FantasyEventType,
@@ -292,7 +292,7 @@ export class FantasyService {
       throw new BadRequestException('You must create a team first');
     }
 
-    const formationDef = getFormationDef(this.fantasyConfig, dto.formation);
+    const formationDef = parseFormation(dto.formation);
     const playerIds = dto.squad.map((p) => p.playerId);
     if (playerIds.length !== this.fantasyConfig.squadSize) {
       throw new BadRequestException(
@@ -381,7 +381,7 @@ export class FantasyService {
       const squad = await squadRepo.save(
         squadRepo.create({
           teamId: team.id,
-          formation: dto.formation as FormationCode,
+          formation: dto.formation,
           gameweekId: gameweek.id,
           isLocked: false,
           lockedAt: null,
@@ -780,7 +780,7 @@ export class FantasyService {
 
     if (!baseSquad) throw new NotFoundException('Squad not found');
 
-    const formationDef = getFormationDef(this.fantasyConfig, dto.formation);
+    const formationDef = parseFormation(dto.formation);
 
     const startingPlayerIds = dto.startingPlayerIds;
     const benchPlayerIds = dto.benchPlayerIds;
@@ -834,7 +834,7 @@ export class FantasyService {
     });
 
     // Per-gameweek policy: update the draft squad in-place (no snapshot per change)
-    baseSquad.formation = dto.formation as FormationCode;
+    baseSquad.formation = dto.formation;
     for (const sp of baseSquad.players) {
       sp.isStarting = startingPlayerIds.includes(sp.playerId);
     }

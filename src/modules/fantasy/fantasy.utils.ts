@@ -1,6 +1,6 @@
 import { Player } from '@/modules/players/entities/player.entity';
 import { PositionCode } from './fantasy.types';
-import { FantasyConfig } from '@/common/config/fantasy.config';
+import { BadRequestException } from '@nestjs/common';
 
 export function mapPlayerToPositionCode(player: Player): PositionCode {
   const rawCode = player.position?.code ?? '';
@@ -52,8 +52,72 @@ export function mapPlayerToPositionCode(player: Player): PositionCode {
   return 'MID';
 }
 
-export function getFormationDef(config: FantasyConfig, formation: string) {
-  const def = config.formations.find((f) => f.code === formation);
-  if (!def) throw new Error(`Unsupported formation: ${formation}`);
-  return def;
+export function parseFormation(formation: string): {
+  code: string;
+  positions: Record<PositionCode, number>;
+  lines: number[];
+} {
+  const code = (formation ?? '').trim();
+  const parts = code.split('-').filter(Boolean);
+
+  // Support common formats like "4-4-2" and "4-2-3-1"
+  if (parts.length < 3 || parts.length > 4) {
+    throw new BadRequestException(
+      'Invalid formation. Use formats like "4-4-2" or "4-2-3-1".',
+    );
+  }
+
+  const nums = parts.map((p) => {
+    if (!/^\d+$/.test(p)) {
+      throw new BadRequestException(
+        'Invalid formation. Formation segments must be integers.',
+      );
+    }
+    return Number(p);
+  });
+
+  if (nums.some((n) => !Number.isFinite(n) || n <= 0)) {
+    throw new BadRequestException(
+      'Invalid formation. All formation segments must be positive integers.',
+    );
+  }
+
+  const outfield = nums.reduce((sum, n) => sum + n, 0);
+  if (outfield !== 10) {
+    throw new BadRequestException(
+      'Invalid formation. Outfield lines must sum to 10 (GK is implied).',
+    );
+  }
+
+  const defenders = nums[0];
+  const forwards = nums[nums.length - 1];
+  const midfielders = outfield - defenders - forwards;
+
+  // Practical football constraints (keeps it flexible but sane)
+  if (defenders < 3) {
+    throw new BadRequestException(
+      'Invalid formation. Must have at least 3 defenders.',
+    );
+  }
+  if (forwards < 1) {
+    throw new BadRequestException(
+      'Invalid formation. Must have at least 1 forward.',
+    );
+  }
+  if (midfielders < 1) {
+    throw new BadRequestException(
+      'Invalid formation. Must have at least 1 midfielder.',
+    );
+  }
+
+  return {
+    code,
+    lines: nums,
+    positions: {
+      GK: 1,
+      DEF: defenders,
+      MID: midfielders,
+      FWD: forwards,
+    },
+  };
 }
