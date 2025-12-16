@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { FantasyLeague } from './entities/fantasy-league.entity';
 import { FantasyLeagueMembership } from './entities/fantasy-league-membership.entity';
 import { FantasyTeamRanking } from './entities/fantasy-team-ranking.entity';
@@ -256,69 +256,93 @@ export class FantasyLeagueService {
       throw new NotFoundException('League not found');
     }
 
-    const memberships = await this.membershipRepo.find({
+    const totalItems = await this.membershipRepo.count({
       where: { leagueId: league.id },
     });
+
+    const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+    const currentPage = Math.min(Math.max(page, 1), totalPages);
+
+    const qb = this.membershipRepo
+      .createQueryBuilder('m')
+      .innerJoinAndSelect('m.team', 't')
+      .leftJoinAndSelect('t.owner', 'owner')
+      .leftJoin(
+        FantasyTeamRanking,
+        'r',
+        'r.teamId = m.teamId AND r.fixtureId = 0',
+      )
+      .where('m.leagueId = :leagueId', { leagueId: league.id })
+      .addSelect('COALESCE(r.totalPoints, 0)', 'totalPoints')
+      .addSelect(
+        'RANK() OVER (ORDER BY COALESCE(r.totalPoints, 0) DESC)',
+        'rank',
+      )
+      .orderBy('COALESCE(r.totalPoints, 0)', 'DESC')
+      .addOrderBy('m.joinedAt', 'ASC')
+      .addOrderBy('m.teamId', 'ASC')
+      .offset((currentPage - 1) * limit)
+      .limit(limit);
+
+    const { entities: memberships, raw } = await qb.getRawAndEntities();
     if (!memberships.length) {
       return {
         data: [],
         meta: {
-          totalItems: 0,
+          totalItems,
           itemCount: 0,
           itemsPerPage: limit,
-          totalPages: 1,
-          currentPage: page,
+          totalPages: Math.max(1, Math.ceil(totalItems / limit)),
+          currentPage,
         },
         me: null,
       };
     }
 
-    const teamIds = memberships.map((m) => m.teamId);
-
-    const allRankings = await this.rankingRepo.find({
-      where: { fixtureId: 0, teamId: In(teamIds) as any },
-      relations: ['team', 'team.owner'],
-    });
-
-    if (!allRankings.length) {
-      return {
-        data: [],
-        meta: {
-          totalItems: 0,
-          itemCount: 0,
-          itemsPerPage: limit,
-          totalPages: 1,
-          currentPage: page,
-        },
-        me: null,
-      };
-    }
-
-    allRankings.sort((a, b) => b.totalPoints - a.totalPoints);
-
-    const totalItems = allRankings.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / limit));
-    const currentPage = Math.min(Math.max(page, 1), totalPages);
-    const startIndex = (currentPage - 1) * limit;
-    const endIndex = startIndex + limit;
-
-    const pageRankings = allRankings.slice(startIndex, endIndex);
-
-    const data = pageRankings.map((r, index) => ({
-      team: r.team,
-      totalPoints: r.totalPoints,
-      rank: startIndex + index + 1,
+    const data = memberships.map((m, idx) => ({
+      team: m.team,
+      totalPoints: Number(raw[idx]?.totalPoints) || 0,
+      rank: Number(raw[idx]?.rank) || 1,
     }));
 
-    const meIndex = allRankings.findIndex((r) => r.teamId === myTeam.id);
-    const me =
-      meIndex === -1
-        ? null
-        : {
+    // "Me" rank/points without scanning all members:
+    const myMembership = await this.membershipRepo.findOne({
+      where: { leagueId: league.id, teamId: myTeam.id },
+    });
+
+    const me = !myMembership
+      ? null
+      : await (async () => {
+          const myRow = await this.membershipRepo
+            .createQueryBuilder('m')
+            .leftJoin(
+              FantasyTeamRanking,
+              'r',
+              'r.teamId = m.teamId AND r.fixtureId = 0',
+            )
+            .select('COALESCE(r.totalPoints, 0)', 'totalPoints')
+            .where('m.leagueId = :leagueId', { leagueId: league.id })
+            .andWhere('m.teamId = :teamId', { teamId: myTeam.id })
+            .getRawOne<{ totalPoints: string }>();
+
+          const myPoints = Number(myRow?.totalPoints) || 0;
+          const betterCount = await this.membershipRepo
+            .createQueryBuilder('m')
+            .leftJoin(
+              FantasyTeamRanking,
+              'r',
+              'r.teamId = m.teamId AND r.fixtureId = 0',
+            )
+            .where('m.leagueId = :leagueId', { leagueId: league.id })
+            .andWhere('COALESCE(r.totalPoints, 0) > :p', { p: myPoints })
+            .getCount();
+
+          return {
             teamId: myTeam.id,
-            rank: meIndex + 1,
-            totalPoints: allRankings[meIndex].totalPoints,
+            rank: betterCount + 1,
+            totalPoints: myPoints,
           };
+        })();
 
     return {
       data,

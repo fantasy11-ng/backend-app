@@ -1151,37 +1151,72 @@ export class FantasyService {
   async getSeasonLeaderboard(user: User, page = 1, limit = 50) {
     const { team } = await this.getMyTeam(user);
 
-    const [rankings, totalItems] = await this.rankingRepo.findAndCount({
-      where: { fixtureId: 0 },
-      relations: ['team', 'team.owner'],
-      order: { rank: 'ASC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    // Efficient, DB-driven leaderboard:
+    // - include teams with no season row yet via LEFT JOIN + COALESCE
+    // - compute rank across all teams via window function
+    const totalItems = await this.teamRepo.count();
+    const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+    const currentPage = Math.min(Math.max(page, 1), totalPages);
 
-    const meRanking = await this.rankingRepo.findOne({
-      where: { fixtureId: 0, teamId: team.id },
-    });
+    const qb = this.teamRepo
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.owner', 'owner')
+      .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
+      .addSelect('COALESCE(r.totalPoints, 0)', 'totalPoints')
+      .addSelect(
+        'RANK() OVER (ORDER BY COALESCE(r.totalPoints, 0) DESC)',
+        'rank',
+      )
+      .orderBy('COALESCE(r.totalPoints, 0)', 'DESC')
+      .addOrderBy('t.createdAt', 'ASC')
+      .addOrderBy('t.id', 'ASC')
+      .offset((currentPage - 1) * limit)
+      .limit(limit);
 
-    const itemsPerPage = limit;
-    const itemCount = rankings.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+    const { entities: teams, raw } = await qb.getRawAndEntities();
+
+    const data: FantasyTeamRanking[] = teams.map((t, idx) =>
+      this.rankingRepo.create({
+        teamId: t.id,
+        fixtureId: 0,
+        totalPoints: Number(raw[idx]?.totalPoints) || 0,
+        rank: Number(raw[idx]?.rank) || 1,
+        team: t,
+      }),
+    );
+
+    // "Me" rank/points without scanning all teams:
+    const myRow = await this.teamRepo
+      .createQueryBuilder('t')
+      .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
+      .select('COALESCE(r.totalPoints, 0)', 'totalPoints')
+      .where('t.id = :teamId', { teamId: team.id })
+      .getRawOne<{ totalPoints: string }>();
+
+    const myPoints = Number(myRow?.totalPoints) || 0;
+    const betterCount = await this.teamRepo
+      .createQueryBuilder('t')
+      .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
+      .where('COALESCE(r.totalPoints, 0) > :p', { p: myPoints })
+      .getCount();
+
+    const me = {
+      teamId: team.id,
+      rank: betterCount + 1,
+      totalPoints: myPoints,
+      budgetRemaining: Number(team.budgetRemaining),
+    };
 
     return {
-      data: rankings,
+      data,
       meta: {
         totalItems,
-        itemCount,
-        itemsPerPage,
+        itemCount: data.length,
+        itemsPerPage: limit,
         totalPages,
-        currentPage: page,
+        currentPage,
       },
-      me: {
-        teamId: team.id,
-        rank: meRanking ? meRanking.rank : null,
-        totalPoints: meRanking ? meRanking.totalPoints : 0,
-        budgetRemaining: Number(team.budgetRemaining),
-      },
+      me,
     };
   }
 
