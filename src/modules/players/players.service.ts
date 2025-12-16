@@ -27,6 +27,7 @@ export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
     'assists',
     'yellowCards',
     'redCards',
+    'points',
   ],
   searchableColumns: ['name', 'commonName'],
   filterableColumns: {
