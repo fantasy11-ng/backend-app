@@ -18,6 +18,12 @@ import { FantasyTeamRanking } from './fantasy-team-ranking.entity';
 @Entity()
 @Index(['ownerId'], { unique: true })
 export class FantasyTeam {
+  private static readonly bigintNumberTransformer = {
+    to: (value: number | null | undefined) => value,
+    from: (value: string | number | null) =>
+      value == null ? value : Number(value),
+  };
+
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -34,10 +40,16 @@ export class FantasyTeam {
   @Column()
   logoUrl: string;
 
-  @Column({ type: 'bigint' })
+  @Column({
+    type: 'bigint',
+    transformer: FantasyTeam.bigintNumberTransformer,
+  })
   budgetTotal: number;
 
-  @Column({ type: 'bigint' })
+  @Column({
+    type: 'bigint',
+    transformer: FantasyTeam.bigintNumberTransformer,
+  })
   budgetRemaining: number;
 
   @Column({ nullable: true })

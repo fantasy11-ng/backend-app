@@ -17,7 +17,17 @@ import {
 import { DEFAULT_PLAYER_RATING } from '@/common/football/constants/players.constants';
 
 export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
-  sortableColumns: ['id', 'name', 'pool', 'rating', 'price'],
+  sortableColumns: [
+    'id',
+    'name',
+    'pool',
+    'rating',
+    'price',
+    'goals',
+    'assists',
+    'yellowCards',
+    'redCards',
+  ],
   searchableColumns: ['name', 'commonName'],
   filterableColumns: {
     positionId: [FilterOperator.EQ],
@@ -104,7 +114,10 @@ export class PlayersService {
             console.error('Invalid player: no sportmonks player_id');
             continue;
           }
-          if (!playerData.player.country_id) {
+          if (
+            !playerData.player.country_id &&
+            !playerData.player.nationality_id
+          ) {
             console.log(playerData.player);
             continue;
           }
@@ -126,7 +139,8 @@ export class PlayersService {
               : this.footballService.positionIdToPosition(
                   playerData.position_id,
                 ),
-            countryId: playerData.player.country_id,
+            countryId:
+              playerData.player.country_id ?? playerData.player.nationality_id,
           });
         }
       }

@@ -12,7 +12,7 @@ import { FantasyGameweek } from './fantasy-gameweek.entity';
 import { FantasyBoostType } from '../fantasy.types';
 
 @Entity()
-@Index(['teamId', 'gameweekId'], { unique: true })
+@Index(['teamId', 'gameweekId', 'type'], { unique: true })
 export class FantasyBoost {
   @PrimaryGeneratedColumn('uuid')
   id: string;

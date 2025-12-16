@@ -73,6 +73,42 @@ END $$;
 CREATE INDEX IF NOT EXISTS "IDX_fantasy_squad_gameweekId"
   ON "fantasy_squad" ("gameweekId");
       `);
+
+      /**
+       * Boosts: allow multiple boosts per gameweek (one per type).
+       *
+       * Older deployments may still have a unique index on ("teamId", "gameweekId"),
+       * which would incorrectly block applying multiple different boosts in the same
+       * gameweek. We drop that legacy index (if present) and ensure the new unique
+       * index exists on ("teamId", "gameweekId", "type").
+       */
+      await this.dataSource.query(`
+DO $$
+DECLARE idx RECORD;
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'fantasy_boost'
+  ) THEN
+    -- Drop legacy unique indexes that match exactly ("teamId", "gameweekId")
+    FOR idx IN
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'fantasy_boost'
+        AND indexdef ILIKE '%UNIQUE%'
+        AND indexdef ILIKE '%("teamId", "gameweekId")%'
+    LOOP
+      EXECUTE format('DROP INDEX IF EXISTS %I', idx.indexname);
+    END LOOP;
+
+    -- Ensure new uniqueness: one boost per type per team per gameweek
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS "IDX_fantasy_boost_team_gameweek_type" ON "fantasy_boost" ("teamId", "gameweekId", "type")';
+  END IF;
+END $$;
+      `);
     } catch (e) {
       this.logger.warn(
         `Fantasy schema guard skipped/failed: ${(e as Error)?.message ?? e}`,

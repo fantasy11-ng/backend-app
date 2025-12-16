@@ -174,7 +174,7 @@ export class FantasyController {
   @ApiOperation({
     summary: 'Apply a boost for a gameweek',
     description:
-      'Applies one of the available boosts (MAX_CAPTAIN, TRIPLE_CAPTAIN, SAVES_BOOST) for a specific gameweek. Only one boost per team per gameweek is allowed.',
+      'Applies one of the available boosts (MAX_CAPTAIN, TRIPLE_CAPTAIN, SAVES_BOOST) for the next open gameweek. Multiple different boosts can be applied for the same gameweek.',
   })
   @ApiOkResponse({
     description: 'Boost applied successfully',

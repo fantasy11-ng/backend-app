@@ -23,6 +23,7 @@ import { mapPlayerToPositionCode, getFormationDef } from './fantasy.utils';
 import {
   FantasyBoostType,
   FantasyEventType,
+  FantasyGameweekPhase,
   TransferType,
 } from './fantasy.types';
 import {
@@ -457,12 +458,12 @@ export class FantasyService {
       );
     }
 
-    const existing = await this.boostRepo.findOne({
-      where: { teamId: team.id, gameweekId: gameweek.id },
+    const existingSameType = await this.boostRepo.findOne({
+      where: { teamId: team.id, gameweekId: gameweek.id, type: dto.type },
     });
-    if (existing) {
+    if (existingSameType) {
       throw new BadRequestException(
-        'You already have a boost applied for this gameweek',
+        'You already have this boost applied for this gameweek',
       );
     }
 
@@ -520,9 +521,73 @@ export class FantasyService {
       order: { createdAt: 'DESC' },
     });
 
+    const now = this.getNow();
+    const nextGameweek = await this.gameweekRepo
+      .createQueryBuilder('gw')
+      .where('gw.snapshotDeadlineAt > :now', { now })
+      .orderBy('gw.snapshotDeadlineAt', 'ASC')
+      .getOne();
+
+    const boostStatuses = Object.values(FantasyBoostType).map((type) => {
+      if (!nextGameweek) {
+        return {
+          type,
+          state: 'UNAVAILABLE' as const,
+          isActive: false,
+          isUsed: false,
+          isAvailable: false,
+          activeGameweekId: null,
+          usedInGroup: false,
+          usedInKnockout: false,
+        };
+      }
+
+      const seasonBoosts = boosts.filter(
+        (b) => b.gameweek?.externalSeasonId === nextGameweek.externalSeasonId,
+      );
+
+      const usedInGroup = seasonBoosts.some(
+        (b) =>
+          b.type === type && b.gameweek?.phase === FantasyGameweekPhase.GROUP,
+      );
+      const usedInKnockout = seasonBoosts.some(
+        (b) =>
+          b.type === type &&
+          b.gameweek?.phase === FantasyGameweekPhase.KNOCKOUT,
+      );
+
+      const isActive = seasonBoosts.some(
+        (b) => b.type === type && b.gameweekId === nextGameweek.id,
+      );
+
+      const usedInCurrentPhase =
+        nextGameweek.phase === FantasyGameweekPhase.GROUP
+          ? usedInGroup
+          : usedInKnockout;
+
+      const state = isActive
+        ? ('ACTIVE' as const)
+        : usedInCurrentPhase
+          ? ('USED' as const)
+          : ('AVAILABLE' as const);
+
+      return {
+        type,
+        state,
+        isActive,
+        isUsed: state === 'USED' || state === 'ACTIVE',
+        isAvailable: state === 'AVAILABLE',
+        activeGameweekId: isActive ? nextGameweek.id : null,
+        usedInGroup,
+        usedInKnockout,
+      };
+    });
+
     return {
       availableBoosts: Object.values(FantasyBoostType),
       boosts,
+      nextGameweek,
+      boostStatuses,
     };
   }
 
@@ -575,15 +640,17 @@ export class FantasyService {
       .select('p.fixtureId', 'fixtureId')
       .addSelect('p.gameweekId', 'gameweekId')
       .addSelect('SUM(p.totalPoints)', 'totalPoints')
+      .addSelect('MIN(f.startingAt)', 'startingAt')
       .where('p.teamId = :teamId', { teamId: team.id })
       .groupBy('p.fixtureId')
       .addGroupBy('p.gameweekId')
-      .orderBy('f.startingAt', 'ASC')
+      .orderBy('MIN(f.startingAt)', 'ASC')
       .limit(limit)
       .getRawMany<{
         fixtureId: number;
         gameweekId: number | null;
         totalPoints: string;
+        startingAt: string;
       }>();
 
     if (!rows.length) return [];
@@ -1017,9 +1084,8 @@ export class FantasyService {
       );
     }
 
-    team.budgetRemaining = budgetRemaining;
-
-    await this.teamRepo.save(team);
+    // Persist budget explicitly (avoids bigint/string serialization pitfalls)
+    await this.teamRepo.update(team.id, { budgetRemaining });
     await this.squadPlayerRepo.delete({ squadId: baseSquad.id });
     await this.squadPlayerRepo.save(newSquadPlayers);
 

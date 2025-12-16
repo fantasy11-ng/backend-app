@@ -153,14 +153,16 @@ export class FantasyScoringService {
     const squads = Array.from(latestSquadByTeam.values());
 
     // Load boosts for this gameweek and the participating teams (if any)
-    const boostsByTeamId = new Map<string, FantasyBoostType>();
+    const boostsByTeamId = new Map<string, Set<FantasyBoostType>>();
     if (gameweek && squads.length) {
       const teamIds = squads.map((s) => s.teamId);
       const boosts = await this.boostRepo.find({
         where: { gameweekId: gameweek.id, teamId: In(teamIds) as any },
       });
       for (const b of boosts) {
-        boostsByTeamId.set(b.teamId, b.type);
+        const set = boostsByTeamId.get(b.teamId) ?? new Set<FantasyBoostType>();
+        set.add(b.type);
+        boostsByTeamId.set(b.teamId, set);
       }
     }
 
@@ -169,7 +171,13 @@ export class FantasyScoringService {
 
     for (const squad of squads) {
       const teamId = squad.teamId;
-      const boostType = gameweek ? boostsByTeamId.get(teamId) : undefined;
+      const boostTypes = gameweek ? boostsByTeamId.get(teamId) : undefined;
+      const hasMaxCaptain =
+        boostTypes?.has(FantasyBoostType.MAX_CAPTAIN) ?? false;
+      const hasTripleCaptain =
+        boostTypes?.has(FantasyBoostType.TRIPLE_CAPTAIN) ?? false;
+      const hasSavesBoost =
+        boostTypes?.has(FantasyBoostType.SAVES_BOOST) ?? false;
       let teamTotal = 0;
       const startingPlayers = squad.players.filter((sp) => sp.isStarting);
 
@@ -206,23 +214,22 @@ export class FantasyScoringService {
         let total = basePoints + bonusPoints + rolePoints;
 
         // Apply captain-related boosts
-        if (boostType === FantasyBoostType.MAX_CAPTAIN) {
+        const captainMultiplier = hasTripleCaptain ? 3 : 2;
+        if (hasMaxCaptain) {
           const isCaptain = captainSp && sp.id === captainSp.id;
           const isVice = viceCaptainSp && sp.id === viceCaptainSp.id;
           if ((isCaptain || isVice) && stat.minutesPlayed > 0) {
-            total *= 2;
+            total *= captainMultiplier;
           }
         } else {
           if (effectiveCaptainId && sp.id === effectiveCaptainId) {
-            const multiplier =
-              boostType === FantasyBoostType.TRIPLE_CAPTAIN ? 3 : 2;
-            total *= multiplier;
+            total *= captainMultiplier;
           }
         }
 
         // Apply saves boost (3 points per save for goalkeeper)
         if (
-          boostType === FantasyBoostType.SAVES_BOOST &&
+          hasSavesBoost &&
           sp.position === 'GK' &&
           stat.saves > 0
         ) {

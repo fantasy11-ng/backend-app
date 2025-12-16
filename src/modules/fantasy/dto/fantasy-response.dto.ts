@@ -32,12 +32,51 @@ export class ApplyBoostResponseDto extends SimpleMessageResponseDto {
   gameweekId: number;
 }
 
+export enum FantasyBoostState {
+  AVAILABLE = 'AVAILABLE',
+  USED = 'USED',
+  ACTIVE = 'ACTIVE',
+  UNAVAILABLE = 'UNAVAILABLE',
+}
+
+export class FantasyBoostStatusDto {
+  @ApiProperty({ enum: FantasyBoostType })
+  type: FantasyBoostType;
+
+  @ApiProperty({ enum: FantasyBoostState })
+  state: FantasyBoostState;
+
+  @ApiProperty()
+  isActive: boolean;
+
+  @ApiProperty()
+  isUsed: boolean;
+
+  @ApiProperty()
+  isAvailable: boolean;
+
+  @ApiProperty({ nullable: true })
+  activeGameweekId: number | null;
+
+  @ApiProperty()
+  usedInGroup: boolean;
+
+  @ApiProperty()
+  usedInKnockout: boolean;
+}
+
 export class GetBoostsResponseDto {
   @ApiProperty({ enum: FantasyBoostType, isArray: true })
   availableBoosts: FantasyBoostType[];
 
   @ApiProperty({ type: FantasyBoost, isArray: true })
   boosts: FantasyBoost[];
+
+  @ApiProperty({ type: FantasyGameweek, nullable: true })
+  nextGameweek: FantasyGameweek | null;
+
+  @ApiProperty({ type: FantasyBoostStatusDto, isArray: true })
+  boostStatuses: FantasyBoostStatusDto[];
 }
 
 export class MyTeamResponseDto {
