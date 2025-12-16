@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { FantasyTeam } from './entities/fantasy-team.entity';
@@ -28,6 +28,7 @@ import { PlayerFixtureStats } from '@/modules/players/entities/player-fixture-st
 @Injectable()
 export class FantasyScoringService {
   private fantasyConfig: FantasyConfig;
+  private readonly logger = new Logger(FantasyScoringService.name);
 
   constructor(
     private readonly configService: ConfigService<MainConfig>,
@@ -55,7 +56,77 @@ export class FantasyScoringService {
     this.fantasyConfig = this.configService.get('fantasy', { infer: true })!;
   }
 
-  async computeForFixture(fixtureId: number) {
+  private getNow(): Date {
+    const iso = this.fantasyConfig.nowOverrideIso;
+    if (!iso) return new Date();
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return new Date();
+    return d;
+  }
+
+  /**
+   * Recompute scoring for all locally-synced fixtures from the beginning of time
+   * up to (and including) the current "now" (supports nowOverrideIso).
+   *
+   * Idempotent: computeForFixture clears and re-inserts points/rankings per fixture.
+   */
+  async computeUpToNow(options?: { until?: Date; concurrency?: number }) {
+    const until = options?.until ?? this.getNow();
+    const concurrency = Math.max(1, Math.min(options?.concurrency ?? 1, 5));
+
+    const fixtureRows = await this.fixtureRepo
+      .createQueryBuilder('f')
+      .select(['f.id', 'f.startingAt'])
+      .where('f.startingAt <= :until', { until })
+      .orderBy('f.startingAt', 'ASC')
+      .getMany();
+
+    const fixtureIds = fixtureRows.map((f) => f.id);
+
+    let processed = 0;
+    let scored = 0;
+    let skippedNoStats = 0;
+    let errors = 0;
+
+    const runOne = async (fixtureId: number) => {
+      processed++;
+      try {
+        const result = await this.computeForFixture(fixtureId);
+        if (result === 'no_stats') skippedNoStats++;
+        else scored++;
+      } catch (e) {
+        errors++;
+        this.logger.warn(
+          `computeForFixture failed for fixture ${fixtureId}: ${
+            (e as Error)?.message ?? e
+          }`,
+        );
+      }
+    };
+
+    // Simple concurrency-limited runner
+    let idx = 0;
+    const workers = Array.from({ length: concurrency }).map(async () => {
+      while (idx < fixtureIds.length) {
+        const myIdx = idx++;
+        const fixtureId = fixtureIds[myIdx];
+        await runOne(fixtureId);
+      }
+    });
+    await Promise.all(workers);
+
+    return {
+      until,
+      totalFixtures: fixtureIds.length,
+      processed,
+      scored,
+      skippedNoStats,
+      errors,
+      concurrency,
+    };
+  }
+
+  async computeForFixture(fixtureId: number): Promise<'scored' | 'no_stats'> {
     const serviceFixture = await this.fixturesService.getFixtureById(
       fixtureId,
       [],
@@ -80,7 +151,7 @@ export class FantasyScoringService {
       gameweek?.snapshotDeadlineAt || new Date(fallbackKickoffMs);
 
     const stats = await this.statsProvider.getStatsForFixture(fixtureId);
-    if (!stats.length) return;
+    if (!stats.length) return 'no_stats';
 
     // Keep global player stats up-to-date (idempotent via per-fixture upsert)
     await this.upsertPlayerFixtureStatsAndUpdatePlayerTotals(fixtureId, stats);
@@ -95,7 +166,7 @@ export class FantasyScoringService {
     // No relevant fantasy players → nothing to score
     if (!playerIds.length) {
       console.warn(`No relevant fantasy players for fixture ${fixtureId}`);
-      return;
+      return 'no_stats';
     }
 
     // Performance: only load squads that actually contain players with stats,
@@ -228,11 +299,7 @@ export class FantasyScoringService {
         }
 
         // Apply saves boost (3 points per save for goalkeeper)
-        if (
-          hasSavesBoost &&
-          sp.position === 'GK' &&
-          stat.saves > 0
-        ) {
+        if (hasSavesBoost && sp.position === 'GK' && stat.saves > 0) {
           total += 3 * stat.saves;
         }
 
@@ -402,6 +469,8 @@ export class FantasyScoringService {
 
       await this.rankingRepo.save(seasonRankings);
     }
+
+    return 'scored';
   }
 
   async getSeasonLeaderboard() {

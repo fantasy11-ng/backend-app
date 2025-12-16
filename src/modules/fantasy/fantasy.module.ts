@@ -25,6 +25,7 @@ import { FantasyLeague } from './entities/fantasy-league.entity';
 import { FantasyLeagueMembership } from './entities/fantasy-league-membership.entity';
 import { FantasyLeagueService } from './fantasy-league.service';
 import { FantasyLeagueController } from './fantasy-league.controller';
+import { FantasyScoringDailyJob } from './fantasy-scoring.daily-job';
 
 /**
  * Lightweight, idempotent schema guard for Fantasy tables.
@@ -143,6 +144,7 @@ END $$;
   providers: [
     FantasyService,
     FantasyScoringService,
+    FantasyScoringDailyJob,
     FantasyLeagueService,
     FantasySchemaInitService,
     SportmonksMatchStatsProvider,

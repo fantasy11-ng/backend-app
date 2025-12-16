@@ -433,4 +433,28 @@ export class FantasyController {
     await this.scoringService.computeForFixture(fixtureId);
     return { message: 'Scoring recomputed' };
   }
+
+  @Post('scoring/recompute')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Recompute scoring for all fixtures up to now',
+    description:
+      'Admin only. Recomputes all fantasy points and leaderboards for every locally-synced fixture whose kickoff time is <= the server "now" (supports FANTASY_NOW_OVERRIDE_ISO).',
+  })
+  @ApiQuery({
+    name: 'concurrency',
+    required: false,
+    type: Number,
+    description:
+      'How many fixtures to score in parallel (default: 1, max: 5). Increase carefully due to upstream rate limits.',
+    example: 1,
+  })
+  async recomputeUpToNow(@Query('concurrency') concurrency?: string) {
+    const parsed = concurrency ? parseInt(concurrency, 10) || 1 : 1;
+    const result = await this.scoringService.computeUpToNow({
+      concurrency: parsed,
+    });
+    return { message: 'Bulk scoring recomputed', ...result };
+  }
 }
