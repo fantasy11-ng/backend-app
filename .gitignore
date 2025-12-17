@@ -36,3 +36,5 @@ lerna-debug.log*
 .vercel
 .env*
 .env.*
+.team.json
+.fixture-stats.json

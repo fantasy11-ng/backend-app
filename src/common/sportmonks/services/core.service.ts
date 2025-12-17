@@ -9,10 +9,29 @@ export class SportmonksCoreService {
   constructor(private http: HttpService) {}
 
   async getCountries() {
-    const { data } = await firstValueFrom(
-      this.http.get<SportmonksResponse<SportmonksCountry[]>>('/core/countries'),
-    );
+    const all: SportmonksCountry[] = [];
+    let page = 1;
+    let hasMore = true;
+    const perPage = 200;
 
-    return data.data;
+    while (hasMore) {
+      const { data } = await firstValueFrom(
+        this.http.get<SportmonksResponse<SportmonksCountry[]>>(
+          '/core/countries',
+          {
+            params: { per_page: perPage, page },
+          },
+        ),
+      );
+
+      if (data?.data?.length) {
+        all.push(...data.data);
+      }
+
+      hasMore = Boolean(data.pagination?.has_more);
+      page = data.pagination?.next_page ?? page + 1;
+    }
+
+    return all;
   }
 }
