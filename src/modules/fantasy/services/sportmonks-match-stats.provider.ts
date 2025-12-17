@@ -1,10 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import {
-  MATCH_STATS_PROVIDER,
-  MatchStatsProvider,
-  PlayerMatchStats,
-} from '../match-stats.provider';
+import { MatchStatsProvider, PlayerMatchStats } from '../match-stats.provider';
 import { SportmonksFixturesService } from '@/common/sportmonks/services/fixtures.service';
+import { SportmonksPlayersService } from '@/common/sportmonks/services/players.service';
+import { PlayersService } from '@/modules/players/players.service';
 import { Player } from '@/modules/players/entities/player.entity';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -13,15 +11,16 @@ import { DataSource } from 'typeorm';
 export class SportmonksMatchStatsProvider implements MatchStatsProvider {
   constructor(
     private readonly fixturesService: SportmonksFixturesService,
+    private readonly sportmonksPlayersService: SportmonksPlayersService,
+    private readonly playersService: PlayersService,
     @InjectDataSource() private readonly db: DataSource,
   ) {}
 
   async getStatsForFixture(fixtureId: number): Promise<PlayerMatchStats[]> {
     try {
       // Fetch fixture statistics from Sportmonks
-      const fixtureStats = await this.fixturesService.getFixtureStatistics(
-        fixtureId,
-      );
+      const fixtureStats =
+        await this.fixturesService.getFixtureStatistics(fixtureId);
 
       if (!fixtureStats || fixtureStats.length === 0) {
         return [];
@@ -53,7 +52,7 @@ export class SportmonksMatchStatsProvider implements MatchStatsProvider {
         const team1 = fixture.participants[i];
         for (let j = i + 1; j < fixture.participants.length; j++) {
           const team2 = fixture.participants[j];
-          
+
           // Team1's goals conceded = Team2's total goals scored
           const team2Stats = fixtureStats.find(
             (s) => s.participant_id === team2.id,
@@ -66,7 +65,7 @@ export class SportmonksMatchStatsProvider implements MatchStatsProvider {
             );
             participantGoalsConceded.set(team1.id, team2TotalGoals);
           }
-          
+
           // Team2's goals conceded = Team1's total goals scored
           const team1Stats = fixtureStats.find(
             (s) => s.participant_id === team1.id,
@@ -107,6 +106,42 @@ export class SportmonksMatchStatsProvider implements MatchStatsProvider {
       for (const player of players) {
         if (player.externalId) {
           playerMap.set(player.externalId, player);
+        }
+      }
+
+      // If scoring references players we haven't synced yet, fetch + upsert them on-demand.
+      const missingIds: number[] = [];
+      for (const id of sportmonksPlayerIds) {
+        if (!playerMap.has(id)) missingIds.push(id);
+      }
+
+      if (missingIds.length) {
+        // Avoid hammering upstream; cap per fixture.
+        const toFetch = missingIds.slice(0, 60);
+        await Promise.all(
+          toFetch.map(async (id) => {
+            try {
+              const smPlayer =
+                await this.sportmonksPlayersService.getPlayerById(id);
+              await this.playersService.upsertFromSportmonksPlayer({
+                sportmonksPlayerId: id,
+                player: smPlayer,
+              });
+            } catch (e) {
+              // Best-effort only; we’ll just skip if still missing.
+              return;
+            }
+          }),
+        );
+
+        // Reload any newly upserted players into the map
+        const reloaded = await this.db
+          .getRepository(Player)
+          .createQueryBuilder('player')
+          .where('player.externalId IN (:...ids)', { ids: toFetch })
+          .getMany();
+        for (const p of reloaded) {
+          if (p.externalId) playerMap.set(p.externalId, p);
         }
       }
 
@@ -157,8 +192,7 @@ export class SportmonksMatchStatsProvider implements MatchStatsProvider {
             const isGoalkeeperOrDefender =
               player.position?.code?.toUpperCase() === 'G' ||
               player.position?.code?.toUpperCase() === 'D' ||
-              player.position?.developer_name?.toUpperCase() ===
-                'GOALKEEPER' ||
+              player.position?.developer_name?.toUpperCase() === 'GOALKEEPER' ||
               player.position?.developer_name?.toUpperCase() === 'DEFENDER';
 
             stats.push({
@@ -192,4 +226,3 @@ export class SportmonksMatchStatsProvider implements MatchStatsProvider {
     }
   }
 }
-

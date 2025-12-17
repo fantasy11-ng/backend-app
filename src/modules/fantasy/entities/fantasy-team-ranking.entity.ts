@@ -42,6 +42,29 @@ export class FantasyTeamRanking {
   @Column({ type: 'int' })
   totalPoints: number;
 
+  // Aggregated raw stats (team-level) for tie-breakers / display
+  @Column({ type: 'int', default: 0 })
+  goals: number;
+
+  @Column({ type: 'int', default: 0 })
+  assists: number;
+
+  @Column({ type: 'int', default: 0 })
+  saves: number;
+
+  @Column({ type: 'int', default: 0 })
+  yellowCards: number;
+
+  @Column({ type: 'int', default: 0 })
+  redCards: number;
+
+  @Column({ type: 'int', default: 0 })
+  ownGoals: number;
+
+  // Count of fixtures with a clean sheet (0 or 1 for fixture rows)
+  @Column({ type: 'int', default: 0 })
+  cleanSheets: number;
+
   @Column({ type: 'int' })
   rank: number;
 

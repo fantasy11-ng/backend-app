@@ -83,6 +83,32 @@ export class MyTeamResponseDto {
   @ApiProperty({ type: FantasyTeam })
   team: FantasyTeam;
 
+  @ApiProperty({
+    type: 'object',
+    properties: {
+      rank: { type: 'number' },
+      totalPoints: { type: 'number' },
+      goals: { type: 'number' },
+      assists: { type: 'number' },
+      saves: { type: 'number' },
+      yellowCards: { type: 'number' },
+      redCards: { type: 'number' },
+      ownGoals: { type: 'number' },
+      cleanSheets: { type: 'number' },
+    },
+  })
+  season: {
+    rank: number;
+    totalPoints: number;
+    goals: number;
+    assists: number;
+    saves: number;
+    yellowCards: number;
+    redCards: number;
+    ownGoals: number;
+    cleanSheets: number;
+  };
+
   @ApiProperty({ type: FantasySquad, nullable: true })
   currentSquad?: FantasySquad | null;
 }
@@ -126,7 +152,6 @@ export class FantasyRankingListResponseDto {
     budgetRemaining: number;
   } | null;
 }
-
 
 export class UpcomingFixtureDto {
   @ApiProperty()

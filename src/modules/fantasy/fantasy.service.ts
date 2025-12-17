@@ -242,10 +242,33 @@ export class FantasyService {
     });
     if (!team) throw new NotFoundException('Fantasy team not found');
 
+    // Season summary (rank + stats). Defaults to zeros if no scoring yet.
+    const seasonRow = await this.rankingRepo.findOne({
+      where: { fixtureId: 0, teamId: team.id },
+    });
+    const seasonTotalPoints = seasonRow?.totalPoints ?? 0;
+    const betterCount = await this.teamRepo
+      .createQueryBuilder('t')
+      .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
+      .where('COALESCE(r.totalPoints, 0) > :p', { p: seasonTotalPoints })
+      .getCount();
+
+    const season = {
+      rank: betterCount + 1,
+      totalPoints: seasonTotalPoints,
+      goals: seasonRow?.goals ?? 0,
+      assists: seasonRow?.assists ?? 0,
+      saves: seasonRow?.saves ?? 0,
+      yellowCards: seasonRow?.yellowCards ?? 0,
+      redCards: seasonRow?.redCards ?? 0,
+      ownGoals: seasonRow?.ownGoals ?? 0,
+      cleanSheets: seasonRow?.cleanSheets ?? 0,
+    };
+
     // If the team exists but the user hasn't created an initial squad yet,
     // return the team and let the client prompt squad creation.
     if (!team.squads?.length) {
-      return { team, currentSquad: null };
+      return { team, season, currentSquad: null };
     }
 
     const gameweek = await this.getNextOpenGameweek();
@@ -253,7 +276,7 @@ export class FantasyService {
       team,
       gameweek,
     );
-    return { team, currentSquad };
+    return { team, season, currentSquad };
   }
 
   async createTeam(user: User, dto: CreateFantasyTeamDto) {

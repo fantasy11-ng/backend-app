@@ -239,9 +239,32 @@ export class FantasyScoringService {
 
     const pointsToSave: FantasyPoints[] = [];
     const totalsByTeamId = new Map<string, number>();
+    const statsByTeamId = new Map<
+      string,
+      {
+        goals: number;
+        assists: number;
+        saves: number;
+        yellowCards: number;
+        redCards: number;
+        ownGoals: number;
+        cleanSheets: number; // 0/1 for fixture rows
+      }
+    >();
 
     for (const squad of squads) {
       const teamId = squad.teamId;
+      if (!statsByTeamId.has(teamId)) {
+        statsByTeamId.set(teamId, {
+          goals: 0,
+          assists: 0,
+          saves: 0,
+          yellowCards: 0,
+          redCards: 0,
+          ownGoals: 0,
+          cleanSheets: 0,
+        });
+      }
       const boostTypes = gameweek ? boostsByTeamId.get(teamId) : undefined;
       const hasMaxCaptain =
         boostTypes?.has(FantasyBoostType.MAX_CAPTAIN) ?? false;
@@ -277,6 +300,18 @@ export class FantasyScoringService {
       for (const sp of startingPlayers) {
         const stat = statsByPlayerId.get(sp.playerId);
         if (!stat) continue;
+
+        const agg = statsByTeamId.get(teamId)!;
+        agg.goals += stat.goals || 0;
+        agg.assists += stat.assists || 0;
+        agg.saves += stat.saves || 0;
+        agg.yellowCards += stat.yellowCards || 0;
+        agg.redCards += stat.redCards || 0;
+        agg.ownGoals += stat.ownGoals || 0;
+        if (stat.cleanSheet) {
+          // cleanSheet is only true for GK/DEF in our provider; mark fixture clean sheet once
+          agg.cleanSheets = 1;
+        }
 
         const basePoints = this.calculateBasePoints(sp.position, stat);
         const bonusPoints = this.calculateBonusPoints(stat);
@@ -353,6 +388,15 @@ export class FantasyScoringService {
 
     for (let i = 0; i < teamTotals.length; i++) {
       const [teamId, totalPoints] = teamTotals[i];
+      const agg = statsByTeamId.get(teamId) ?? {
+        goals: 0,
+        assists: 0,
+        saves: 0,
+        yellowCards: 0,
+        redCards: 0,
+        ownGoals: 0,
+        cleanSheets: 0,
+      };
 
       if (lastPoints !== null && totalPoints < lastPoints) {
         currentRank = i + 1;
@@ -363,7 +407,15 @@ export class FantasyScoringService {
         this.rankingRepo.create({
           teamId,
           fixtureId,
+          gameweekId: gameweek?.id ?? null,
           totalPoints,
+          goals: agg.goals,
+          assists: agg.assists,
+          saves: agg.saves,
+          yellowCards: agg.yellowCards,
+          redCards: agg.redCards,
+          ownGoals: agg.ownGoals,
+          cleanSheets: agg.cleanSheets,
           rank: currentRank,
         }),
       );
@@ -377,10 +429,37 @@ export class FantasyScoringService {
         .createQueryBuilder('p')
         .select('p.teamId', 'teamId')
         .addSelect('SUM(p.totalPoints)', 'totalPoints')
+        .addSelect('SUM(p.goals)', 'goals')
+        .addSelect('SUM(p.assists)', 'assists')
+        .addSelect('SUM(p.saves)', 'saves')
+        .addSelect('SUM(p.yellowCards)', 'yellowCards')
+        .addSelect('SUM(p.redCards)', 'redCards')
+        .addSelect('SUM(p.ownGoals)', 'ownGoals')
         .where('p.gameweekId = :gwId', { gwId: gameweek.id })
         .groupBy('p.teamId')
         .orderBy('totalPoints', 'DESC')
-        .getRawMany<{ teamId: string; totalPoints: string }>();
+        .getRawMany<{
+          teamId: string;
+          totalPoints: string;
+          goals: string;
+          assists: string;
+          saves: string;
+          yellowCards: string;
+          redCards: string;
+          ownGoals: string;
+        }>();
+
+      const gwCleanSheetsRaw = await this.rankingRepo
+        .createQueryBuilder('r')
+        .select('r.teamId', 'teamId')
+        .addSelect('SUM(r.cleanSheets)', 'cleanSheets')
+        .where('r.gameweekId = :gwId', { gwId: gameweek.id })
+        .andWhere('r.fixtureId > 0')
+        .groupBy('r.teamId')
+        .getRawMany<{ teamId: string; cleanSheets: string }>();
+      const gwCleanSheetsByTeamId = new Map<string, number>(
+        gwCleanSheetsRaw.map((r) => [r.teamId, Number(r.cleanSheets) || 0]),
+      );
 
       // Clear existing gameweek rankings for this gameweek
       await this.rankingRepo.delete({ gameweekId: gameweek.id });
@@ -398,7 +477,16 @@ export class FantasyScoringService {
         let gwLastPoints: number | null = null;
 
         for (let i = 0; i < gwRows.length; i++) {
-          const { teamId, totalPoints } = gwRows[i];
+          const {
+            teamId,
+            totalPoints,
+            goals,
+            assists,
+            saves,
+            yellowCards,
+            redCards,
+            ownGoals,
+          } = gwRows[i];
           const numericPoints = Number(totalPoints) || 0;
 
           if (gwLastPoints !== null && numericPoints < gwLastPoints) {
@@ -412,6 +500,13 @@ export class FantasyScoringService {
               fixtureId: -1, // denotes gameweek aggregate
               gameweekId: gameweek.id,
               totalPoints: numericPoints,
+              goals: Number(goals) || 0,
+              assists: Number(assists) || 0,
+              saves: Number(saves) || 0,
+              yellowCards: Number(yellowCards) || 0,
+              redCards: Number(redCards) || 0,
+              ownGoals: Number(ownGoals) || 0,
+              cleanSheets: gwCleanSheetsByTeamId.get(teamId) ?? 0,
               rank: gwCurrentRank,
               team: gwTeamById.get(teamId),
             }),
@@ -422,15 +517,32 @@ export class FantasyScoringService {
       }
     }
 
-    // Rebuild season rankings (fixtureId = 0) from all per-fixture rankings
+    // Rebuild season rankings (fixtureId = 0) from all per-fixture rankings (exclude gameweek aggregates)
     const seasonRows = await this.rankingRepo
       .createQueryBuilder('r')
       .select('r.teamId', 'teamId')
       .addSelect('SUM(r.totalPoints)', 'totalPoints')
-      .where('r.fixtureId != :seasonFixtureId', { seasonFixtureId: 0 })
+      .addSelect('SUM(r.goals)', 'goals')
+      .addSelect('SUM(r.assists)', 'assists')
+      .addSelect('SUM(r.saves)', 'saves')
+      .addSelect('SUM(r.yellowCards)', 'yellowCards')
+      .addSelect('SUM(r.redCards)', 'redCards')
+      .addSelect('SUM(r.ownGoals)', 'ownGoals')
+      .addSelect('SUM(r.cleanSheets)', 'cleanSheets')
+      .where('r.fixtureId > 0')
       .groupBy('r.teamId')
       .orderBy('totalPoints', 'DESC')
-      .getRawMany<{ teamId: string; totalPoints: string }>();
+      .getRawMany<{
+        teamId: string;
+        totalPoints: string;
+        goals: string;
+        assists: string;
+        saves: string;
+        yellowCards: string;
+        redCards: string;
+        ownGoals: string;
+        cleanSheets: string;
+      }>();
 
     // Clear existing season rows
     await this.rankingRepo.delete({ fixtureId: 0 });
@@ -448,7 +560,17 @@ export class FantasyScoringService {
       let seasonLastPoints: number | null = null;
 
       for (let i = 0; i < seasonRows.length; i++) {
-        const { teamId, totalPoints } = seasonRows[i];
+        const {
+          teamId,
+          totalPoints,
+          goals,
+          assists,
+          saves,
+          yellowCards,
+          redCards,
+          ownGoals,
+          cleanSheets,
+        } = seasonRows[i];
         const numericPoints = Number(totalPoints) || 0;
 
         if (seasonLastPoints !== null && numericPoints < seasonLastPoints) {
@@ -461,6 +583,13 @@ export class FantasyScoringService {
             teamId,
             fixtureId: 0,
             totalPoints: numericPoints,
+            goals: Number(goals) || 0,
+            assists: Number(assists) || 0,
+            saves: Number(saves) || 0,
+            yellowCards: Number(yellowCards) || 0,
+            redCards: Number(redCards) || 0,
+            ownGoals: Number(ownGoals) || 0,
+            cleanSheets: Number(cleanSheets) || 0,
             rank: seasonCurrentRank,
             team: teamById.get(teamId),
           }),

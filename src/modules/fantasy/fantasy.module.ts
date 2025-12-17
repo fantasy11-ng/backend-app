@@ -110,6 +110,65 @@ BEGIN
   END IF;
 END $$;
       `);
+
+      /**
+       * Team rankings: add aggregated stats columns (goals/cards/etc) if missing.
+       * These are used for season/gameweek/fixture leaderboard display and for `team/me`.
+       */
+      await this.dataSource.query(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'fantasy_team_ranking'
+  ) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fantasy_team_ranking' AND column_name = 'goals'
+    ) THEN
+      ALTER TABLE "fantasy_team_ranking" ADD COLUMN "goals" integer NOT NULL DEFAULT 0;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fantasy_team_ranking' AND column_name = 'assists'
+    ) THEN
+      ALTER TABLE "fantasy_team_ranking" ADD COLUMN "assists" integer NOT NULL DEFAULT 0;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fantasy_team_ranking' AND column_name = 'saves'
+    ) THEN
+      ALTER TABLE "fantasy_team_ranking" ADD COLUMN "saves" integer NOT NULL DEFAULT 0;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fantasy_team_ranking' AND column_name = 'yellowCards'
+    ) THEN
+      ALTER TABLE "fantasy_team_ranking" ADD COLUMN "yellowCards" integer NOT NULL DEFAULT 0;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fantasy_team_ranking' AND column_name = 'redCards'
+    ) THEN
+      ALTER TABLE "fantasy_team_ranking" ADD COLUMN "redCards" integer NOT NULL DEFAULT 0;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fantasy_team_ranking' AND column_name = 'ownGoals'
+    ) THEN
+      ALTER TABLE "fantasy_team_ranking" ADD COLUMN "ownGoals" integer NOT NULL DEFAULT 0;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fantasy_team_ranking' AND column_name = 'cleanSheets'
+    ) THEN
+      ALTER TABLE "fantasy_team_ranking" ADD COLUMN "cleanSheets" integer NOT NULL DEFAULT 0;
+    END IF;
+  END IF;
+END $$;
+      `);
     } catch (e) {
       this.logger.warn(
         `Fantasy schema guard skipped/failed: ${(e as Error)?.message ?? e}`,

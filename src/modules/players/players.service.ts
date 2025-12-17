@@ -7,6 +7,7 @@ import { CreatePlayerDto } from './dto/create-player.dto';
 import { FootballService } from 'src/common/football/services/football.service';
 import { SettingsService } from '../settings/settings.service';
 import { SportmonksTeam } from 'src/common/sportmonks/types/teams.type';
+import { SportmonksPlayer } from '@/common/sportmonks/types/players.types';
 import {
   FilterOperator,
   PaginateConfig,
@@ -87,8 +88,88 @@ export class PlayersService {
     });
   }
 
+  /**
+   * Idempotent upsert for a Sportmonks player record.
+   * Uses Sportmonks `playerId` as `externalId` (stable ID used in fixture stats).
+   */
+  async upsertFromSportmonksPlayer(params: {
+    sportmonksPlayerId: number;
+    player: SportmonksPlayer;
+    positionId?: number;
+    position?: {
+      id: number;
+      name: string;
+      code: string;
+      developer_name: string;
+    } | null;
+    fallbackCountryId?: number;
+  }) {
+    const {
+      sportmonksPlayerId,
+      player,
+      positionId,
+      position,
+      fallbackCountryId,
+    } = params;
+
+    const pid = positionId ?? player.position_id;
+    if (!pid) {
+      throw new Error(
+        `Missing position_id for sportmonksPlayerId=${sportmonksPlayerId}`,
+      );
+    }
+
+    const pos =
+      position ??
+      player.position ??
+      this.footballService.positionIdToPosition(pid);
+
+    const countryId =
+      (player.nationality_id as any) ??
+      (player.country_id as any) ??
+      (fallbackCountryId as any) ??
+      0;
+
+    return this.createOrUpdatePlayer({
+      externalId: sportmonksPlayerId,
+      image: player.image_path,
+      name: player.name,
+      commonName: player.common_name,
+      rating: this.footballService.getRating(player.name),
+      pool: this.footballService.getPlayerPool(player.name),
+      positionId: pid,
+      position: {
+        id: pos.id,
+        name: pos.name,
+        developer_name: pos.developer_name,
+        code: pos.code,
+      },
+      countryId,
+    });
+  }
+
   async syncPlayers() {
     const league = await this.settingsService.getMainServiceLeague();
+
+    let validCountryIds: Set<number> | null = null;
+    try {
+      const countries = await this.sportmonksPlayersService.getCountries();
+      validCountryIds = new Set(countries.map((c) => c.id));
+    } catch (e) {
+      // Best-effort: if countries can't be loaded, still sync players.
+      validCountryIds = null;
+    }
+
+    const pickCountryId = (...candidates: Array<number | null | undefined>) => {
+      for (const c of candidates) {
+        if (c == null) continue;
+        const n = Number(c);
+        if (!Number.isFinite(n) || n <= 0) continue;
+        if (validCountryIds && !validCountryIds.has(n)) continue;
+        return n;
+      }
+      return 0;
+    };
 
     let hasMore = true;
     let page = 1;
@@ -102,47 +183,78 @@ export class PlayersService {
         });
 
       for (const team of data.data) {
-        for (const playerData of team.players) {
-          if (!playerData.position_id) {
-            console.error('Invalid player: no player position');
-            continue;
+        const squad = team.players ?? [];
+        for (const playerData of squad) {
+          try {
+            // SportMonks team squad items have their own id (row id) and a `player_id` which
+            // is the stable SportMonks player id. We must persist the player id.
+            const sportmonksPlayerId =
+              (playerData as any).player_id ?? playerData.player?.id;
+            if (!sportmonksPlayerId) {
+              console.error('Invalid player: no sportmonks player_id');
+              continue;
+            }
+
+            const smPlayer = playerData.player;
+            if (!smPlayer) {
+              console.error(
+                `Invalid player ${sportmonksPlayerId}: missing included player payload`,
+              );
+              continue;
+            }
+
+            const positionId = playerData.position_id ?? smPlayer.position_id;
+            if (!positionId) {
+              console.error(
+                `Invalid player ${sportmonksPlayerId}: no position_id`,
+              );
+              continue;
+            }
+
+            // Prefer the squad-position include; fallback to player.position include; fallback to local mapping.
+            const pos =
+              playerData.position ??
+              smPlayer.position ??
+              this.footballService.positionIdToPosition(positionId);
+
+            // Don't drop players just because Sportmonks country fields are missing.
+            // Fallback to the team's country_id so scoring can still match the player.
+            const countryId = pickCountryId(
+              smPlayer.nationality_id as any,
+              smPlayer.country_id as any,
+              team.country_id as any,
+            );
+            if (
+              validCountryIds &&
+              countryId === 0 &&
+              (smPlayer.nationality_id ||
+                smPlayer.country_id ||
+                team.country_id)
+            ) {
+              console.warn(
+                `Player ${sportmonksPlayerId} has unknown country IDs: nationality_id=${smPlayer.nationality_id} country_id=${smPlayer.country_id} team.country_id=${team.country_id}`,
+              );
+            }
+
+            await this.upsertFromSportmonksPlayer({
+              sportmonksPlayerId,
+              player: smPlayer,
+              positionId,
+              position: {
+                id: pos.id,
+                name: pos.name,
+                developer_name: pos.developer_name,
+                code: pos.code,
+              },
+              fallbackCountryId: countryId,
+            });
+          } catch (e) {
+            console.error(
+              `Failed to upsert player for team ${team.id}: ${
+                (e as Error)?.message ?? e
+              }`,
+            );
           }
-          // SportMonks team squad items have their own id (row id) and a `player_id` which
-          // is the stable SportMonks player id. We must persist the player id.
-          const sportmonksPlayerId =
-            (playerData as any).player_id ?? playerData.player?.id;
-          if (!sportmonksPlayerId) {
-            console.error('Invalid player: no sportmonks player_id');
-            continue;
-          }
-          if (
-            !playerData.player.country_id &&
-            !playerData.player.nationality_id
-          ) {
-            console.log(playerData.player);
-            continue;
-          }
-          await this.createOrUpdatePlayer({
-            externalId: sportmonksPlayerId,
-            image: playerData.player.image_path,
-            name: playerData.player.name,
-            commonName: playerData.player.common_name,
-            rating: this.footballService.getRating(playerData.player.name),
-            pool: this.footballService.getPlayerPool(playerData.player.name),
-            positionId: playerData.position_id,
-            position: playerData.position
-              ? {
-                  id: playerData.player.position.id,
-                  name: playerData.player.position.name,
-                  developer_name: playerData.player.position.developer_name,
-                  code: playerData.player.position.code,
-                }
-              : this.footballService.positionIdToPosition(
-                  playerData.position_id,
-                ),
-            countryId:
-              playerData.player.country_id ?? playerData.player.nationality_id,
-          });
         }
       }
 

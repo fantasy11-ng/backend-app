@@ -8,6 +8,7 @@ import { firstValueFrom } from 'rxjs';
 import { SportmonksPlayer } from '../types/players.types';
 import { SportmonksResponse } from '../types/response.type';
 import { SportmonksCoreService } from './core.service';
+import { SportmonksCountry } from '../types/countries.type';
 
 @Injectable()
 export class SportmonksPlayersService {
@@ -15,6 +16,29 @@ export class SportmonksPlayersService {
     private http: HttpService,
     private smCoreService: SportmonksCoreService,
   ) {}
+
+  async getPlayerById(playerId: number) {
+    try {
+      const { data } = await firstValueFrom(
+        this.http.get<SportmonksResponse<SportmonksPlayer>>(
+          `/football/players/${playerId}`,
+          {
+            params: {
+              include: 'position',
+            },
+          },
+        ),
+      );
+
+      return data.data as SportmonksPlayer;
+    } catch (e) {
+      throw new BadGatewayException(`Error fetching player ${playerId}`);
+    }
+  }
+
+  async getCountries(): Promise<SportmonksCountry[]> {
+    return await this.smCoreService.getCountries();
+  }
 
   async getPlayersBySeason(seasonId: number) {
     const { data } = await firstValueFrom(
