@@ -1186,6 +1186,13 @@ export class FantasyService {
       .leftJoinAndSelect('t.owner', 'owner')
       .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
       .addSelect('COALESCE(r.totalPoints, 0)', 'totalPoints')
+      .addSelect('COALESCE(r.goals, 0)', 'goals')
+      .addSelect('COALESCE(r.assists, 0)', 'assists')
+      .addSelect('COALESCE(r.saves, 0)', 'saves')
+      .addSelect('COALESCE(r.yellowCards, 0)', 'yellowCards')
+      .addSelect('COALESCE(r.redCards, 0)', 'redCards')
+      .addSelect('COALESCE(r.ownGoals, 0)', 'ownGoals')
+      .addSelect('COALESCE(r.cleanSheets, 0)', 'cleanSheets')
       .addSelect(
         'RANK() OVER (ORDER BY COALESCE(r.totalPoints, 0) DESC)',
         'rank',
@@ -1203,6 +1210,13 @@ export class FantasyService {
         teamId: t.id,
         fixtureId: 0,
         totalPoints: Number(raw[idx]?.totalPoints) || 0,
+        goals: Number(raw[idx]?.goals) || 0,
+        assists: Number(raw[idx]?.assists) || 0,
+        saves: Number(raw[idx]?.saves) || 0,
+        yellowCards: Number(raw[idx]?.yellowCards) || 0,
+        redCards: Number(raw[idx]?.redCards) || 0,
+        ownGoals: Number(raw[idx]?.ownGoals) || 0,
+        cleanSheets: Number(raw[idx]?.cleanSheets) || 0,
         rank: Number(raw[idx]?.rank) || 1,
         team: t,
       }),
@@ -1213,8 +1227,24 @@ export class FantasyService {
       .createQueryBuilder('t')
       .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
       .select('COALESCE(r.totalPoints, 0)', 'totalPoints')
+      .addSelect('COALESCE(r.goals, 0)', 'goals')
+      .addSelect('COALESCE(r.assists, 0)', 'assists')
+      .addSelect('COALESCE(r.saves, 0)', 'saves')
+      .addSelect('COALESCE(r.yellowCards, 0)', 'yellowCards')
+      .addSelect('COALESCE(r.redCards, 0)', 'redCards')
+      .addSelect('COALESCE(r.ownGoals, 0)', 'ownGoals')
+      .addSelect('COALESCE(r.cleanSheets, 0)', 'cleanSheets')
       .where('t.id = :teamId', { teamId: team.id })
-      .getRawOne<{ totalPoints: string }>();
+      .getRawOne<{
+        totalPoints: string;
+        goals: string;
+        assists: string;
+        saves: string;
+        yellowCards: string;
+        redCards: string;
+        ownGoals: string;
+        cleanSheets: string;
+      }>();
 
     const myPoints = Number(myRow?.totalPoints) || 0;
     const betterCount = await this.teamRepo
@@ -1227,6 +1257,13 @@ export class FantasyService {
       teamId: team.id,
       rank: betterCount + 1,
       totalPoints: myPoints,
+      goals: Number(myRow?.goals) || 0,
+      assists: Number(myRow?.assists) || 0,
+      saves: Number(myRow?.saves) || 0,
+      yellowCards: Number(myRow?.yellowCards) || 0,
+      redCards: Number(myRow?.redCards) || 0,
+      ownGoals: Number(myRow?.ownGoals) || 0,
+      cleanSheets: Number(myRow?.cleanSheets) || 0,
       budgetRemaining: Number(team.budgetRemaining),
     };
 

@@ -169,6 +169,40 @@ BEGIN
   END IF;
 END $$;
       `);
+
+      /**
+       * Gameweeks: `code` must be unique per season (NOT globally).
+       *
+       * Older DBs may have a global unique constraint on fantasy_gameweek.code.
+       * Drop it if present and replace with a composite unique index on
+       * (externalSeasonId, code).
+       */
+      await this.dataSource.query(`
+DO $$
+DECLARE idx RECORD;
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'fantasy_gameweek'
+  ) THEN
+    -- Drop any unique index on just ("code")
+    FOR idx IN
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'fantasy_gameweek'
+        AND indexdef ILIKE '%UNIQUE%'
+        AND indexdef ILIKE '%("code")%'
+    LOOP
+      EXECUTE format('DROP INDEX IF EXISTS %I', idx.indexname);
+    END LOOP;
+
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS "IDX_fantasy_gameweek_season_code" ON "fantasy_gameweek" ("externalSeasonId", "code")';
+  END IF;
+END $$;
+      `);
     } catch (e) {
       this.logger.warn(
         `Fantasy schema guard skipped/failed: ${(e as Error)?.message ?? e}`,

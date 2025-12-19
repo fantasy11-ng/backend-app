@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -10,11 +11,12 @@ import { FantasyPoints } from './fantasy-points.entity';
 import { FantasyGameweekPhase } from '../fantasy.types';
 
 @Entity()
+@Index(['externalSeasonId', 'code'], { unique: true })
 export class FantasyGameweek {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ unique: true })
+  @Column()
   code: string;
 
   @Column()
