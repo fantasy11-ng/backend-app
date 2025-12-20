@@ -30,6 +30,7 @@ export class SettingsService {
 
   async setMainServiceLeague(dto: SetMainServiceLeagueDto) {
     const serviceLeagueRepo = this.db.getRepository(ServiceLeague);
+    const serviceSeasonRepo = this.db.getRepository(ServiceSeason);
 
     const league = await this.sportmonksLeaguesService.getLeagueById({
       leagueId: dto.leagueId,
@@ -44,18 +45,35 @@ export class SettingsService {
 
     await this.resetServiceLeagues();
 
-    const serviceSeason = new ServiceSeason();
-    serviceSeason.serviceId = league.currentseason.id;
+    // Upsert season (by Sportmonks season id)
+    let serviceSeason = await serviceSeasonRepo.findOne({
+      where: { serviceId: league.currentseason.id },
+    });
+    if (!serviceSeason) {
+      serviceSeason = new ServiceSeason();
+      serviceSeason.serviceId = league.currentseason.id;
+    }
     serviceSeason.name = league.currentseason.name;
     serviceSeason.externalLeagueId = league.id;
+    serviceSeason = await serviceSeasonRepo.save(serviceSeason);
 
-    const serviceLeague = new ServiceLeague();
+    // Upsert league row:
+    // - Prefer by league serviceId (Sportmonks league id)
+    // - Fallback: if an existing row already references this season, reuse it to avoid 1:1 constraint violation
+    const existing = await serviceLeagueRepo
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.currentSeason', 's')
+      .where('l.serviceId = :leagueId', { leagueId: league.id })
+      .orWhere('s.serviceId = :seasonId', { seasonId: serviceSeason.serviceId })
+      .getOne();
+
+    const serviceLeague = existing ?? new ServiceLeague();
     serviceLeague.isMain = true;
     serviceLeague.name = league.name;
-    serviceLeague.imageUrl = league.image_path;
+    serviceLeague.imageUrl = league.image_path || '';
     serviceLeague.serviceId = league.id;
     serviceLeague.lastPlayedAt = new Date(league.last_played_at);
-    serviceLeague.countryId = league.country_id;
+    serviceLeague.countryId = league.country_id || 0;
     serviceLeague.currentSeason = serviceSeason;
 
     return await serviceLeagueRepo.save(serviceLeague);
@@ -106,7 +124,7 @@ export class SettingsService {
       season.serviceId = smSeason.id;
       season.name = smSeason.name;
       season.externalLeagueId = smSeason.league_id || smSeason.league?.id;
-      await serviceSeasonRepo.save(season);
+      season = await serviceSeasonRepo.save(season);
 
       league = smSeason.league || {};
     } else {
@@ -119,7 +137,16 @@ export class SettingsService {
     // Set this season's league as main
     await this.resetServiceLeagues();
 
-    const serviceLeague = new ServiceLeague();
+    const existing = await serviceLeagueRepo
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.currentSeason', 's')
+      .where('l.serviceId = :leagueId', {
+        leagueId: league?.id || season.externalLeagueId,
+      })
+      .orWhere('s.serviceId = :seasonId', { seasonId: season.serviceId })
+      .getOne();
+
+    const serviceLeague = existing ?? new ServiceLeague();
     serviceLeague.isMain = true;
     serviceLeague.name = league?.name || 'League';
     serviceLeague.imageUrl = league?.image_path || '';

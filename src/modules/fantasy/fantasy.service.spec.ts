@@ -32,6 +32,8 @@ describe('FantasyService', () => {
             findOne: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
+            count: jest.fn(),
+            createQueryBuilder: jest.fn(),
           },
         },
         {
@@ -69,6 +71,7 @@ describe('FantasyService', () => {
           provide: getRepositoryToken(FantasyTeamRanking),
           useValue: {
             find: jest.fn(),
+            create: jest.fn((x) => x),
           },
         },
         {
@@ -126,12 +129,121 @@ describe('FantasyService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('getSeasonLeaderboard', () => {
+    it('should return season leaderboard rows with aggregated stats (goals/assists/cards/etc)', async () => {
+      const fakeUser = { id: 'u1' } as any;
+      const myTeam = { id: 't-me', budgetRemaining: 123 } as any;
+      jest.spyOn(service, 'getMyTeam').mockResolvedValue({ team: myTeam } as any);
+
+      (teamRepo.count as any).mockResolvedValue(2);
+
+      const listTeams = [{ id: 't1' }, { id: 't2' }] as any[];
+      const listRaw = [
+        {
+          totalPoints: '10',
+          goals: '3',
+          assists: '2',
+          saves: '1',
+          yellowCards: '4',
+          redCards: '0',
+          ownGoals: '0',
+          cleanSheets: '2',
+          rank: '1',
+        },
+        {
+          totalPoints: '5',
+          goals: '0',
+          assists: '1',
+          saves: '0',
+          yellowCards: '1',
+          redCards: '1',
+          ownGoals: '0',
+          cleanSheets: '0',
+          rank: '2',
+        },
+      ];
+
+      const qbList: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawAndEntities: jest
+          .fn()
+          .mockResolvedValue({ entities: listTeams, raw: listRaw }),
+      };
+
+      const qbMe: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({
+          totalPoints: '5',
+          goals: '1',
+          assists: '2',
+          saves: '3',
+          yellowCards: '4',
+          redCards: '5',
+          ownGoals: '6',
+          cleanSheets: '7',
+        }),
+      };
+
+      const qbBetter: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+      };
+
+      (teamRepo.createQueryBuilder as any)
+        .mockReturnValueOnce(qbList)
+        .mockReturnValueOnce(qbMe)
+        .mockReturnValueOnce(qbBetter);
+
+      const res = await service.getSeasonLeaderboard(fakeUser as any, 1, 50);
+
+      expect(res.data).toHaveLength(2);
+      expect(res.data[0]).toMatchObject({
+        teamId: 't1',
+        fixtureId: 0,
+        totalPoints: 10,
+        goals: 3,
+        assists: 2,
+        saves: 1,
+        yellowCards: 4,
+        redCards: 0,
+        ownGoals: 0,
+        cleanSheets: 2,
+        rank: 1,
+      });
+
+      expect(res.me).toMatchObject({
+        teamId: 't-me',
+        rank: 2,
+        totalPoints: 5,
+        goals: 1,
+        assists: 2,
+        saves: 3,
+        yellowCards: 4,
+        redCards: 5,
+        ownGoals: 6,
+        cleanSheets: 7,
+        budgetRemaining: 123,
+      });
+    });
+  });
+
   // Additional tests can be added here for:
   // - Team creation validation
   // - Transfer validation
   // - Lineup updates
   // - Role assignments
 });
+
 
 
 

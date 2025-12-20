@@ -273,8 +273,12 @@ export class StagesService {
     const roundToGameweek = new Map<number, number>();
 
     for (const [groupKey, group] of groups.entries()) {
+      // IMPORTANT: code must be stable and unique within a season.
+      // Sportmonks round names can repeat; use round IDs to avoid collisions.
       const code =
-        groupKey === 'finals' ? 'finals' : `gw-${group.name || groupKey}`;
+        groupKey === 'finals'
+          ? `finals:${seasonId}`
+          : `round:${seasonId}:${group.roundIds[0]}`;
 
       let gameweek = await gameweekRepo.findOne({
         where: { externalSeasonId: group.seasonId, code },
