@@ -55,7 +55,7 @@ import { FantasyTransfer } from './entities/fantasy-transfer.entity';
 
 @ApiTags('Fantasy')
 @Controller('fantasy')
-//@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard)
 export class FantasyController {
   constructor(
     private readonly fantasyService: FantasyService,
@@ -435,8 +435,8 @@ export class FantasyController {
   }
 
   @Post('scoring/recompute')
-  //@UseGuards(JwtAuthGuard, RolesGuard)
-  //@Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Recompute scoring for all fixtures up to now',
     description:
