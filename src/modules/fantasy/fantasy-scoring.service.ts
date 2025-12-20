@@ -437,7 +437,8 @@ export class FantasyScoringService {
         .addSelect('SUM(p.ownGoals)', 'ownGoals')
         .where('p.gameweekId = :gwId', { gwId: gameweek.id })
         .groupBy('p.teamId')
-        .orderBy('totalPoints', 'DESC')
+        // Avoid ordering by a mixed-case alias in Postgres (would be folded to lowercase and fail).
+        .orderBy('SUM(p.totalPoints)', 'DESC')
         .getRawMany<{
           teamId: string;
           totalPoints: string;
@@ -461,8 +462,9 @@ export class FantasyScoringService {
         gwCleanSheetsRaw.map((r) => [r.teamId, Number(r.cleanSheets) || 0]),
       );
 
-      // Clear existing gameweek rankings for this gameweek
-      await this.rankingRepo.delete({ gameweekId: gameweek.id });
+      // Clear existing *gameweek aggregate* rankings for this gameweek.
+      // IMPORTANT: fixture rankings also have gameweekId set, so we must not delete by gameweekId alone.
+      await this.rankingRepo.delete({ gameweekId: gameweek.id, fixtureId: -1 });
 
       if (gwRows.length) {
         const gwTeamIds = gwRows.map((r) => r.teamId);
@@ -531,7 +533,8 @@ export class FantasyScoringService {
       .addSelect('SUM(r.cleanSheets)', 'cleanSheets')
       .where('r.fixtureId > 0')
       .groupBy('r.teamId')
-      .orderBy('totalPoints', 'DESC')
+      // Avoid ordering by a mixed-case alias in Postgres (would be folded to lowercase and fail).
+      .orderBy('SUM(r.totalPoints)', 'DESC')
       .getRawMany<{
         teamId: string;
         totalPoints: string;
