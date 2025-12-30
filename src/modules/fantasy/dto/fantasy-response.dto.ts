@@ -79,6 +79,14 @@ export class GetBoostsResponseDto {
   boostStatuses: FantasyBoostStatusDto[];
 }
 
+export class GetGameweeksResponseDto {
+  @ApiProperty({ type: FantasyGameweek, isArray: true })
+  gameweeks: FantasyGameweek[];
+
+  @ApiProperty({ type: FantasyGameweek, nullable: true })
+  nextGameweek: FantasyGameweek | null;
+}
+
 export class MyTeamResponseDto {
   @ApiProperty({ type: FantasyTeam })
   team: FantasyTeam;

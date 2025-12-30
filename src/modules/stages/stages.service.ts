@@ -214,6 +214,23 @@ export class StagesService {
       firstKickoffByRound.set(row.roundId, new Date(row.firstKickoffAt));
     }
 
+    // Get per-stage earliest kickoff time from local fixtures
+    // (Needed for knockout phases where Sportmonks "rounds" may not exist / be meaningful.)
+    const perStage = await fixturesRepo
+      .createQueryBuilder('f')
+      .select('f.stageId', 'stageId')
+      .addSelect('MIN(f.startingAt)', 'firstKickoffAt')
+      .where('f.externalSeasonId = :seasonId', { seasonId })
+      .andWhere('f.stageId IS NOT NULL')
+      .groupBy('f.stageId')
+      .getRawMany<{ stageId: number; firstKickoffAt: string }>();
+
+    const firstKickoffByStage = new Map<number, Date>();
+    for (const row of perStage) {
+      if (!row.stageId) continue;
+      firstKickoffByStage.set(row.stageId, new Date(row.firstKickoffAt));
+    }
+
     const fantasyConfig = this.configService.get('fantasy', { infer: true })!;
     const snapshotLeadMinutes = fantasyConfig.snapshotLeadMinutes ?? 120;
 
@@ -223,18 +240,24 @@ export class StagesService {
       where: { externalSeasonId: seasonId },
     });
     const stageById = new Map(stages.map((s) => [s.id, s]));
+    const stageByCode = new Map(stages.map((s) => [s.code, s]));
 
-    // Group rounds into gameweeks; finals + third-place share one gameweek
+    // Build gameweeks from:
+    // - group-stage rounds (matchdays)
+    // - knockout stages (R16/QF/SF + finals/third-place) based on fixtures
     type GwGroup = {
       roundIds: number[];
+      stageIds: number[];
       firstKickoffAt: Date;
       seasonId: number;
       name: string;
       phase: 'GROUP' | 'KNOCKOUT';
+      externalRoundId: number;
     };
 
     const groups = new Map<string, GwGroup>();
 
+    // 1) Group-stage gameweeks from rounds
     for (const round of rounds) {
       const firstKickoff = firstKickoffByRound.get(round.id);
       if (!firstKickoff) continue;
@@ -242,24 +265,24 @@ export class StagesService {
       const stage = stageById.get(round.stage_id);
       const stageCode = stage?.code;
 
-      let groupKey: string;
+      // For this tournament we treat Sportmonks "rounds" as GROUP matchdays only.
+      if (stageCode !== 'group-stage') continue;
+
       const phase: 'GROUP' | 'KNOCKOUT' =
         stageCode === 'group-stage' ? 'GROUP' : 'KNOCKOUT';
 
-      if (stageCode === 'final' || stageCode === 'third-place') {
-        groupKey = 'finals';
-      } else {
-        groupKey = `round:${round.id}`;
-      }
+      const groupKey = `round:${round.id}`;
 
       let group = groups.get(groupKey);
       if (!group) {
         group = {
           roundIds: [],
+          stageIds: [],
           firstKickoffAt: firstKickoff,
           seasonId: round.season_id,
           name: round.name || String(round.id),
           phase,
+          externalRoundId: round.id,
         };
         groups.set(groupKey, group);
       } else if (firstKickoff < group.firstKickoffAt) {
@@ -269,8 +292,65 @@ export class StagesService {
       group.roundIds.push(round.id);
     }
 
-    // Create/update gameweeks and map rounds to gameweekIds
+    // 2) Knockout gameweeks from stages + fixtures
+    const knockoutStageCodes = new Set([
+      'round-of-16',
+      'quarter-finals',
+      'semi-finals',
+      'final',
+      'third-place',
+    ]);
+
+    for (const stage of stages) {
+      if (!knockoutStageCodes.has(stage.code)) continue;
+
+      const firstKickoff = firstKickoffByStage.get(stage.id);
+      if (!firstKickoff) continue; // stage exists but fixtures aren't available locally yet
+
+      const phase: 'GROUP' | 'KNOCKOUT' = 'KNOCKOUT';
+      const groupKey =
+        stage.code === 'final' || stage.code === 'third-place'
+          ? 'finals'
+          : `stage:${stage.id}`;
+
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = {
+          roundIds: [],
+          stageIds: [],
+          firstKickoffAt: firstKickoff,
+          seasonId: seasonId,
+          name: stage.name || stage.code,
+          phase,
+          externalRoundId: stage.id, // for knockout, store stage id here (field name is legacy)
+        };
+        groups.set(groupKey, group);
+      } else if (firstKickoff < group.firstKickoffAt) {
+        group.firstKickoffAt = firstKickoff;
+      }
+
+      group.stageIds.push(stage.id);
+    }
+
+    // Prefer storing the actual "final" stage id for the finals gameweek if available
+    const finalStageId = stageByCode.get('final')?.id;
+    const thirdPlaceStageId = stageByCode.get('third-place')?.id;
+    const finalsGroup = groups.get('finals');
+    if (finalsGroup) {
+      const preferred =
+        (finalStageId && finalsGroup.stageIds.includes(finalStageId)
+          ? finalStageId
+          : null) ??
+        (thirdPlaceStageId && finalsGroup.stageIds.includes(thirdPlaceStageId)
+          ? thirdPlaceStageId
+          : null) ??
+        (finalsGroup.stageIds.length ? finalsGroup.stageIds[0] : null);
+      if (preferred != null) finalsGroup.externalRoundId = preferred;
+    }
+
+    // Create/update gameweeks and map rounds/stages to gameweekIds
     const roundToGameweek = new Map<number, number>();
+    const stageToGameweek = new Map<number, number>();
 
     for (const [groupKey, group] of groups.entries()) {
       // IMPORTANT: code must be stable and unique within a season.
@@ -278,7 +358,9 @@ export class StagesService {
       const code =
         groupKey === 'finals'
           ? `finals:${seasonId}`
-          : `round:${seasonId}:${group.roundIds[0]}`;
+          : groupKey.startsWith('round:')
+            ? `round:${seasonId}:${group.roundIds[0]}`
+            : `stage:${seasonId}:${group.stageIds[0]}`;
 
       let gameweek = await gameweekRepo.findOne({
         where: { externalSeasonId: group.seasonId, code },
@@ -293,7 +375,7 @@ export class StagesService {
           code,
           name: `Round ${group.name}`,
           externalSeasonId: group.seasonId,
-          externalRoundId: group.roundIds[0],
+          externalRoundId: group.externalRoundId,
           firstKickoffAt: group.firstKickoffAt,
           snapshotDeadlineAt: snapshotDeadline,
           phase:
@@ -305,7 +387,7 @@ export class StagesService {
       } else {
         gameweek.firstKickoffAt = group.firstKickoffAt;
         gameweek.snapshotDeadlineAt = snapshotDeadline;
-        gameweek.externalRoundId = group.roundIds[0];
+        gameweek.externalRoundId = group.externalRoundId;
         gameweek.phase =
           group.phase === 'GROUP'
             ? FantasyGameweekPhase.GROUP
@@ -317,12 +399,23 @@ export class StagesService {
       for (const roundId of group.roundIds) {
         roundToGameweek.set(roundId, saved.id);
       }
+
+      for (const stageId of group.stageIds) {
+        stageToGameweek.set(stageId, saved.id);
+      }
     }
 
     // Update fixtures with their gameweekId
     for (const [roundId, gameweekId] of roundToGameweek.entries()) {
       await fixturesRepo.update(
         { externalSeasonId: seasonId, roundId },
+        { gameweekId },
+      );
+    }
+
+    for (const [stageId, gameweekId] of stageToGameweek.entries()) {
+      await fixturesRepo.update(
+        { externalSeasonId: seasonId, stageId },
         { gameweekId },
       );
     }
