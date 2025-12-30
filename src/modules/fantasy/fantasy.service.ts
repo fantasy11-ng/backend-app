@@ -614,6 +614,21 @@ export class FantasyService {
     };
   }
 
+  async getGameweeks() {
+    const gameweeks = await this.gameweekRepo.find({
+      order: {
+        firstKickoffAt: 'ASC',
+        id: 'ASC',
+      },
+    });
+
+    const now = this.getNow();
+    const nextGameweek =
+      gameweeks.find((gw) => gw.snapshotDeadlineAt > now) ?? null;
+
+    return { gameweeks, nextGameweek };
+  }
+
   async getUpcomingFixtures(limit = 10) {
     const now = this.getNow();
     const fixtures = await this.fixtureRepo
@@ -1084,11 +1099,37 @@ export class FantasyService {
     const existingByPlayerId = new Map(
       baseSquad.players.map((sp) => [sp.playerId, sp]),
     );
+    // For transferred-in players, inherit lineup/role flags from the transferred-out player.
+    // This prevents starter/bench imbalance after transfers.
+    const incomingDefaultsByPlayerId = new Map<
+      number,
+      Pick<
+        FantasySquadPlayer,
+        | 'isStarting'
+        | 'isCaptain'
+        | 'isViceCaptain'
+        | 'isPenaltyTaker'
+        | 'isFreeKickTaker'
+      >
+    >();
+    for (const t of dto.transfers) {
+      if (!t.playerOutId) continue;
+      const outSp = existingByPlayerId.get(t.playerOutId);
+      if (!outSp) continue;
+      incomingDefaultsByPlayerId.set(t.playerInId, {
+        isStarting: outSp.isStarting,
+        isCaptain: outSp.isCaptain,
+        isViceCaptain: outSp.isViceCaptain,
+        isPenaltyTaker: outSp.isPenaltyTaker,
+        isFreeKickTaker: outSp.isFreeKickTaker,
+      });
+    }
     const newSquadPlayers: FantasySquadPlayer[] = [];
 
     for (const pid of keepPlayerIds) {
       const player = keepMap.get(pid)!;
       const existingSp = existingByPlayerId.get(pid);
+      const incomingDefaults = incomingDefaultsByPlayerId.get(pid);
       const position = mapPlayerToPositionCode(player);
 
       newSquadPlayers.push(
@@ -1098,11 +1139,22 @@ export class FantasyService {
           player,
           playerId: player.id,
           position,
-          isStarting: existingSp?.isStarting ?? false,
-          isCaptain: existingSp?.isCaptain ?? false,
-          isViceCaptain: existingSp?.isViceCaptain ?? false,
-          isPenaltyTaker: existingSp?.isPenaltyTaker ?? false,
-          isFreeKickTaker: existingSp?.isFreeKickTaker ?? false,
+          isStarting:
+            existingSp?.isStarting ?? incomingDefaults?.isStarting ?? false,
+          isCaptain:
+            existingSp?.isCaptain ?? incomingDefaults?.isCaptain ?? false,
+          isViceCaptain:
+            existingSp?.isViceCaptain ??
+            incomingDefaults?.isViceCaptain ??
+            false,
+          isPenaltyTaker:
+            existingSp?.isPenaltyTaker ??
+            incomingDefaults?.isPenaltyTaker ??
+            false,
+          isFreeKickTaker:
+            existingSp?.isFreeKickTaker ??
+            incomingDefaults?.isFreeKickTaker ??
+            false,
         }),
       );
     }

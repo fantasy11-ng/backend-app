@@ -34,6 +34,7 @@ import {
   SimpleMessageResponseDto,
   ApplyBoostResponseDto,
   GetBoostsResponseDto,
+  GetGameweeksResponseDto,
   UpcomingFixtureDto,
   FixturePerformanceItemDto,
   TeamHistoryResponseDto,
@@ -201,6 +202,20 @@ export class FantasyController {
   })
   async getBoosts(@Req() req: Request) {
     return this.fantasyService.getBoosts(req.user as User);
+  }
+
+  @Get('gameweeks')
+  @ApiOperation({
+    summary: 'List fantasy gameweeks',
+    description:
+      'Returns all fantasy gameweeks (synced from the active season fixtures/rounds) ordered by kickoff time, plus the next open gameweek.',
+  })
+  @ApiOkResponse({
+    description: 'Gameweeks list',
+    type: GetGameweeksResponseDto,
+  })
+  async getGameweeks() {
+    return this.fantasyService.getGameweeks();
   }
 
   @Get('fixtures/upcoming')
