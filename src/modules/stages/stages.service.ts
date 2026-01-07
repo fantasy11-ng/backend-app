@@ -1,4 +1,4 @@
-import { BadGatewayException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
 import { SportmonksStagesService } from '@/common/sportmonks/services/stages.service';
 import { DataSource } from 'typeorm';
@@ -88,11 +88,36 @@ export class StagesService {
   async syncGroupsAndTeams(stages: SportmonksStage[]) {
     const groupsRepo = this.db.getRepository(Group);
 
+    // Sync teams from *all* stages/fixtures (group + knockout).
+    // Previously we only synced teams seen in group-stage fixtures, which meant KO participants
+    // could be missing locally even though fixtures exist.
+    const allTeamsMap: Record<
+      number,
+      { id: number; name: string; short: string; logo: string }
+    > = {};
+    for (const stage of stages) {
+      for (const fixture of stage.fixtures || []) {
+        for (const participant of fixture.participants || []) {
+          allTeamsMap[participant.id] = {
+            id: participant.id,
+            name: participant.name,
+            short:
+              participant.short_code ||
+              participant.name?.split(' ')?.[0] ||
+              String(participant.id),
+            logo: participant.image_path || '',
+          };
+        }
+      }
+    }
+
     const serviceGroupStage = stages.find(
       (stage) => stage.type.code === 'group-stage',
     );
+    // Some competitions may not have a group stage; still sync teams in that case.
     if (!serviceGroupStage) {
-      throw new BadGatewayException('Service Group Stage unavailable!');
+      await this.syncTeams(Object.values(allTeamsMap));
+      return;
     }
 
     const groupTeams: Record<
@@ -155,9 +180,10 @@ export class StagesService {
         teams,
         externalStageId: serviceGroupStage.id,
       });
-
-      await this.syncTeams(teams);
     }
+
+    // Ensure all teams (including knockout-stage participants) are synced.
+    await this.syncTeams(Object.values(allTeamsMap));
   }
 
   async syncFixtures(stages: SportmonksStage[]) {

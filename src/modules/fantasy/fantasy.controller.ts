@@ -222,7 +222,7 @@ export class FantasyController {
   @ApiOperation({
     summary: 'Get upcoming fixtures',
     description:
-      'Returns upcoming fixtures in the main competition with team information for participants.',
+      'Returns upcoming fixtures for the current gameweek (if the current gameweek has remaining future fixtures); otherwise returns fixtures from the next gameweek. Includes team information for participants.',
   })
   @ApiQuery({
     name: 'limit',
