@@ -9,7 +9,13 @@ import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
 import { FantasyTransfer } from './entities/fantasy-transfer.entity';
 import { FantasyTeamEvent } from './entities/fantasy-team-event.entity';
 import { FantasyTeamRanking } from './entities/fantasy-team-ranking.entity';
+import { FantasyGameweek } from './entities/fantasy-gameweek.entity';
+import { FantasyBoost } from './entities/fantasy-boost.entity';
+import { FantasyPoints } from './entities/fantasy-points.entity';
 import { PlayersService } from '@/modules/players/players.service';
+import { SportmonksFixturesService } from '@/common/sportmonks/services/fixtures.service';
+import { Fixture } from '@/modules/stages/entities/fixture.entity';
+import { FootballTeam } from '@/modules/team/entities/football-team.entity';
 
 describe('FantasyService', () => {
   let service: FantasyService;
@@ -19,6 +25,11 @@ describe('FantasyService', () => {
   let transferRepo: Repository<FantasyTransfer>;
   let eventRepo: Repository<FantasyTeamEvent>;
   let rankingRepo: Repository<FantasyTeamRanking>;
+  let gameweekRepo: Repository<FantasyGameweek>;
+  let boostRepo: Repository<FantasyBoost>;
+  let pointsRepo: Repository<FantasyPoints>;
+  let fixtureRepo: Repository<Fixture>;
+  let footballTeamRepo: Repository<FootballTeam>;
   let playersService: PlayersService;
   let configService: ConfigService;
 
@@ -26,6 +37,10 @@ describe('FantasyService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FantasyService,
+        {
+          provide: SportmonksFixturesService,
+          useValue: {},
+        },
         {
           provide: getRepositoryToken(FantasyTeam),
           useValue: {
@@ -42,6 +57,8 @@ describe('FantasyService', () => {
             findOne: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
+            find: jest.fn(),
+            update: jest.fn(),
           },
         },
         {
@@ -57,6 +74,7 @@ describe('FantasyService', () => {
           useValue: {
             create: jest.fn(),
             save: jest.fn(),
+            find: jest.fn(),
           },
         },
         {
@@ -75,6 +93,45 @@ describe('FantasyService', () => {
           },
         },
         {
+          provide: getRepositoryToken(FantasyGameweek),
+          useValue: {
+            findOne: jest.fn(),
+            find: jest.fn(),
+            findBy: jest.fn(),
+            createQueryBuilder: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(FantasyBoost),
+          useValue: {
+            find: jest.fn(),
+            count: jest.fn(),
+            create: jest.fn((x) => x),
+            save: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(FantasyPoints),
+          useValue: {
+            createQueryBuilder: jest.fn(),
+            find: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(Fixture),
+          useValue: {
+            findOne: jest.fn(),
+            find: jest.fn(),
+            findBy: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(FootballTeam),
+          useValue: {
+            find: jest.fn(),
+          },
+        },
+        {
           provide: PlayersService,
           useValue: {
             getPlayersFromIds: jest.fn(),
@@ -88,6 +145,8 @@ describe('FantasyService', () => {
               squadSize: 15,
               startingXiSize: 11,
               benchSize: 4,
+              snapshotLeadMinutes: 120,
+              nowOverrideIso: '2026-01-01T00:00:00.000Z',
               formations: [
                 {
                   code: '4-4-2',
@@ -120,6 +179,17 @@ describe('FantasyService', () => {
     );
     rankingRepo = module.get<Repository<FantasyTeamRanking>>(
       getRepositoryToken(FantasyTeamRanking),
+    );
+    gameweekRepo = module.get<Repository<FantasyGameweek>>(
+      getRepositoryToken(FantasyGameweek),
+    );
+    boostRepo = module.get<Repository<FantasyBoost>>(getRepositoryToken(FantasyBoost));
+    pointsRepo = module.get<Repository<FantasyPoints>>(
+      getRepositoryToken(FantasyPoints),
+    );
+    fixtureRepo = module.get<Repository<Fixture>>(getRepositoryToken(Fixture));
+    footballTeamRepo = module.get<Repository<FootballTeam>>(
+      getRepositoryToken(FootballTeam),
     );
     playersService = module.get<PlayersService>(PlayersService);
     configService = module.get<ConfigService>(ConfigService);
@@ -234,6 +304,98 @@ describe('FantasyService', () => {
         cleanSheets: 7,
         budgetRemaining: 123,
       });
+    });
+  });
+
+  describe('getUpcomingFixtures', () => {
+    it('should return upcoming fixtures only from the current (last locked) gameweek when it still has future fixtures', async () => {
+      const nextOpenGw = {
+        id: 2,
+        externalSeasonId: 100,
+        snapshotDeadlineAt: new Date('2026-01-02T00:00:00.000Z'),
+      } as any;
+      const lastLockedGw = {
+        id: 1,
+        externalSeasonId: 100,
+        snapshotDeadlineAt: new Date('2025-12-31T20:00:00.000Z'),
+      } as any;
+
+      (gameweekRepo.findOne as any)
+        .mockResolvedValueOnce(nextOpenGw) // next open
+        .mockResolvedValueOnce(lastLockedGw); // last locked
+
+      (fixtureRepo.findOne as any).mockResolvedValueOnce({ id: 999 }); // has upcoming in last locked
+
+      const fixtures = [
+        {
+          id: 10,
+          startingAt: new Date('2026-01-01T10:00:00.000Z'),
+          stageId: 1,
+          gameweekId: 1,
+          participantTeamIds: [1, 2],
+        },
+      ] as any[];
+      (fixtureRepo.find as any).mockResolvedValueOnce(fixtures);
+
+      (footballTeamRepo.find as any).mockResolvedValueOnce([
+        { id: 1, name: 'A' },
+        { id: 2, name: 'B' },
+      ]);
+
+      const res = await service.getUpcomingFixtures(10);
+
+      expect(fixtureRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ gameweekId: 1 }),
+        }),
+      );
+      expect(res).toHaveLength(1);
+      expect(res[0]).toMatchObject({ id: 10, gameweekId: 1 });
+    });
+
+    it('should fall back to the next gameweek when the last locked gameweek has no remaining future fixtures', async () => {
+      const nextOpenGw = {
+        id: 2,
+        externalSeasonId: 100,
+        snapshotDeadlineAt: new Date('2026-01-02T00:00:00.000Z'),
+      } as any;
+      const lastLockedGw = {
+        id: 1,
+        externalSeasonId: 100,
+        snapshotDeadlineAt: new Date('2025-12-31T20:00:00.000Z'),
+      } as any;
+
+      (gameweekRepo.findOne as any)
+        .mockResolvedValueOnce(nextOpenGw) // next open
+        .mockResolvedValueOnce(lastLockedGw); // last locked
+
+      (fixtureRepo.findOne as any).mockResolvedValueOnce(null); // no upcoming in last locked -> use next open
+
+      const fixtures = [
+        {
+          id: 20,
+          startingAt: new Date('2026-01-02T10:00:00.000Z'),
+          stageId: 1,
+          gameweekId: 2,
+          participantTeamIds: [1, 2],
+        },
+      ] as any[];
+      (fixtureRepo.find as any).mockResolvedValueOnce(fixtures);
+
+      (footballTeamRepo.find as any).mockResolvedValueOnce([
+        { id: 1, name: 'A' },
+        { id: 2, name: 'B' },
+      ]);
+
+      const res = await service.getUpcomingFixtures(10);
+
+      expect(fixtureRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ gameweekId: 2 }),
+        }),
+      );
+      expect(res).toHaveLength(1);
+      expect(res[0]).toMatchObject({ id: 20, gameweekId: 2 });
     });
   });
 

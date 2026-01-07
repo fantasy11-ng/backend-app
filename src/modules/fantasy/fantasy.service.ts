@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
 import { FantasyTeam } from './entities/fantasy-team.entity';
 import { FantasySquad } from './entities/fantasy-squad.entity';
 import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
@@ -631,12 +631,45 @@ export class FantasyService {
 
   async getUpcomingFixtures(limit = 10) {
     const now = this.getNow();
-    const fixtures = await this.fixtureRepo
-      .createQueryBuilder('f')
-      .where('f.startingAt > :now', { now })
-      .orderBy('f.startingAt', 'ASC')
-      .limit(limit)
-      .getMany();
+    // Only return upcoming fixtures within the *current* gameweek.
+    // If the last locked gameweek has no remaining future fixtures, fall back to the next gameweek.
+    const nextOpenGameweek = await this.gameweekRepo.findOne({
+      where: { snapshotDeadlineAt: MoreThan(now) },
+      order: { snapshotDeadlineAt: 'ASC', id: 'ASC' },
+    });
+
+    if (!nextOpenGameweek) return [];
+
+    const seasonId = nextOpenGameweek.externalSeasonId;
+    const lastLockedGameweek = await this.gameweekRepo.findOne({
+      where: {
+        externalSeasonId: seasonId,
+        snapshotDeadlineAt: LessThanOrEqual(now),
+      },
+      order: { snapshotDeadlineAt: 'DESC', id: 'DESC' },
+    });
+
+    let targetGameweek = nextOpenGameweek;
+    if (lastLockedGameweek) {
+      const hasUpcomingInLocked = await this.fixtureRepo.findOne({
+        where: {
+          gameweekId: lastLockedGameweek.id,
+          startingAt: MoreThan(now),
+        },
+        select: ['id'],
+        order: { startingAt: 'ASC' },
+      });
+
+      if (hasUpcomingInLocked) {
+        targetGameweek = lastLockedGameweek;
+      }
+    }
+
+    const fixtures = await this.fixtureRepo.find({
+      where: { gameweekId: targetGameweek.id, startingAt: MoreThan(now) },
+      order: { startingAt: 'ASC', id: 'ASC' },
+      take: limit,
+    });
 
     if (!fixtures.length) return [];
 
