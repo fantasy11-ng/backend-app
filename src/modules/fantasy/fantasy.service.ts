@@ -96,7 +96,7 @@ export class FantasyService {
    * Returns the next gameweek whose snapshot deadline is still in the future.
    * This is the gameweek the user is currently "editing towards".
    */
-  private async getNextOpenGameweek(): Promise<FantasyGameweek> {
+  private async getNextOpenGameweek(): Promise<FantasyGameweek | null> {
     const now = this.getNow();
     const gw = await this.gameweekRepo
       .createQueryBuilder('gw')
@@ -105,7 +105,7 @@ export class FantasyService {
       .getOne();
 
     if (!gw) {
-      throw new BadRequestException('No upcoming gameweek available');
+      return null;
     }
 
     return gw;
@@ -272,11 +272,31 @@ export class FantasyService {
     }
 
     const gameweek = await this.getNextOpenGameweek();
-    const currentSquad = await this.getOrCreateDraftSquadForGameweek(
-      team,
-      gameweek,
-    );
-    return { team, season, currentSquad };
+    if (gameweek) {
+      const currentSquad = await this.getOrCreateDraftSquadForGameweek(
+        team,
+        gameweek,
+      );
+      return { team, season, currentSquad };
+    }
+
+    // Season is over / no upcoming gameweek. Return the most recent "current" squad
+    // (and make sure any expired drafts are locked).
+    await this.lockExpiredDraftSquads(team.id);
+
+    const currentSquad =
+      (await this.squadRepo.findOne({
+        where: { teamId: team.id, isCurrent: true },
+        relations: ['players', 'players.player', 'gameweek'],
+        order: { createdAt: 'DESC' },
+      })) ??
+      (await this.squadRepo.findOne({
+        where: { teamId: team.id },
+        relations: ['players', 'players.player', 'gameweek'],
+        order: { createdAt: 'DESC' },
+      }));
+
+    return { team, season, currentSquad: currentSquad ?? null };
   }
 
   async createTeam(user: User, dto: CreateFantasyTeamDto) {
@@ -371,6 +391,9 @@ export class FantasyService {
     });
 
     const gameweek = await this.getNextOpenGameweek();
+    if (!gameweek) {
+      throw new BadRequestException('Season is over: no upcoming gameweek');
+    }
     this.ensureGameweekIsEditable(gameweek);
 
     // Make the entire operation transactional to avoid partial writes:
@@ -839,10 +862,16 @@ export class FantasyService {
 
   async updateLineup(user: User, dto: UpdateLineupDto) {
     const gameweek = await this.getNextOpenGameweek();
+    if (!gameweek) {
+      throw new BadRequestException('Season is over: no upcoming gameweek');
+    }
     this.ensureGameweekIsEditable(gameweek);
     const lockFixtureId = await this.getGameweekFirstFixtureId(gameweek.id);
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
+    if (!currentSquad) {
+      throw new BadRequestException('You must create a squad first');
+    }
 
     const baseSquad = await this.squadRepo.findOne({
       where: { id: currentSquad.id },
@@ -933,10 +962,16 @@ export class FantasyService {
 
   async updateRoles(user: User, dto: UpdateRolesDto) {
     const gameweek = await this.getNextOpenGameweek();
+    if (!gameweek) {
+      throw new BadRequestException('Season is over: no upcoming gameweek');
+    }
     this.ensureGameweekIsEditable(gameweek);
     const lockFixtureId = await this.getGameweekFirstFixtureId(gameweek.id);
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
+    if (!currentSquad) {
+      throw new BadRequestException('You must create a squad first');
+    }
 
     const baseSquad = await this.squadRepo.findOne({
       where: { id: currentSquad.id },
@@ -1020,11 +1055,17 @@ export class FantasyService {
     }
 
     const gameweek = await this.getNextOpenGameweek();
+    if (!gameweek) {
+      throw new BadRequestException('Season is over: no upcoming gameweek');
+    }
     this.ensureGameweekIsEditable(gameweek);
     const lockFixtureId = await this.getGameweekFirstFixtureId(gameweek.id);
 
     const { team, currentSquad } = await this.getMyTeam(user);
     this.ensureOwnership(team, user);
+    if (!currentSquad) {
+      throw new BadRequestException('You must create a squad first');
+    }
 
     const baseSquad = await this.squadRepo.findOne({
       where: { id: currentSquad.id },
