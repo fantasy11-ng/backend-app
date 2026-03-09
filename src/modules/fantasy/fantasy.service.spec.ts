@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { FantasyService } from './fantasy.service';
+import { FantasyTimeService } from './fantasy-time.service';
 import { FantasyTeam } from './entities/fantasy-team.entity';
 import { FantasySquad } from './entities/fantasy-squad.entity';
 import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
@@ -135,6 +136,12 @@ describe('FantasyService', () => {
           provide: PlayersService,
           useValue: {
             getPlayersFromIds: jest.fn(),
+          },
+        },
+        {
+          provide: FantasyTimeService,
+          useValue: {
+            getNow: () => new Date('2026-01-01T00:00:00.000Z'),
           },
         },
         {
@@ -396,6 +403,54 @@ describe('FantasyService', () => {
       );
       expect(res).toHaveLength(1);
       expect(res[0]).toMatchObject({ id: 20, gameweekId: 2 });
+    });
+  });
+
+  describe('getMyTeam (season ended)', () => {
+    it('should return the last/current squad instead of throwing when there is no upcoming gameweek', async () => {
+      const user = { id: 'u1' } as any;
+
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        ownerId: 'u1',
+        squads: [{ id: 's1' }],
+      });
+
+      // No season row -> zeros
+      (rankingRepo.findOne as any).mockResolvedValueOnce(null);
+
+      // betterCount query for rank
+      const qbBetter: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(0),
+      };
+      (teamRepo.createQueryBuilder as any).mockReturnValueOnce(qbBetter);
+
+      // No upcoming gameweek -> season ended
+      const qbNextGw: any = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      (gameweekRepo.createQueryBuilder as any).mockReturnValueOnce(qbNextGw);
+
+      // lockExpiredDraftSquads: no unlocked drafts to lock
+      (squadRepo.find as any).mockResolvedValueOnce([]);
+
+      // Return "current" squad
+      (squadRepo.findOne as any)
+        .mockResolvedValueOnce({
+          id: 's1',
+          teamId: 't1',
+          isCurrent: true,
+          players: [],
+        })
+        .mockResolvedValueOnce(null);
+
+      const res = await service.getMyTeam(user);
+      expect(res.team.id).toBe('t1');
+      expect(res.currentSquad?.id).toBe('s1');
     });
   });
 

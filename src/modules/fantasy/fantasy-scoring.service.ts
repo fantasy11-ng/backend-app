@@ -9,6 +9,7 @@ import { FantasyTeamRanking } from './entities/fantasy-team-ranking.entity';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
 import { FantasyConfig } from '@/common/config/fantasy.config';
+import { FantasyTimeService } from './fantasy-time.service';
 import {
   MATCH_STATS_PROVIDER,
   MatchStatsProvider,
@@ -52,16 +53,13 @@ export class FantasyScoringService {
     private readonly statsProvider: MatchStatsProvider,
     private readonly fixturesService: SportmonksFixturesService,
     @InjectDataSource() private readonly db: DataSource,
+    private readonly fantasyTimeService: FantasyTimeService,
   ) {
     this.fantasyConfig = this.configService.get('fantasy', { infer: true })!;
   }
 
   private getNow(): Date {
-    const iso = this.fantasyConfig.nowOverrideIso;
-    if (!iso) return new Date();
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return new Date();
-    return d;
+    return this.fantasyTimeService.getNow();
   }
 
   /**

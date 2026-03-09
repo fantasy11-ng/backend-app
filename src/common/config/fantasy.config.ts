@@ -42,6 +42,18 @@ export const fantasyConfig = () => {
   // If set, fantasy endpoints will use this date as "now" for queries like upcoming fixtures.
   const nowOverrideIso = process.env.FANTASY_NOW_OVERRIDE_ISO || undefined;
 
+  // Simulated time: advances automatically. Formula: simulatedNow = anchor + (realNow - realAnchor) × speed
+  // FANTASY_SIM_ANCHOR_ISO: tournament start in simulated time (e.g. 2022-11-20 for World Cup 2022)
+  // FANTASY_SIM_REAL_ANCHOR_ISO: when in real time we "started" (omit = server start)
+  // FANTASY_SIM_SPEED: multiplier (2 = 2x speed, 24 = 1 real hour = 1 sim day, 1 = realtime)
+  const simAnchorIso = process.env.FANTASY_SIM_ANCHOR_ISO || undefined;
+  const simRealAnchorIso = process.env.FANTASY_SIM_REAL_ANCHOR_ISO || undefined;
+  const simSpeedParsed = process.env.FANTASY_SIM_SPEED;
+  const simSpeed =
+    simSpeedParsed != null && simSpeedParsed !== ''
+      ? parseFloat(simSpeedParsed)
+      : undefined;
+
   const scoring: ScoringConfig = {
     goal: 5,
     assist: 3,
@@ -69,6 +81,9 @@ export const fantasyConfig = () => {
     transfersLocked: process.env.FANTASY_TRANSFERS_LOCKED === 'true',
     snapshotLeadMinutes,
     nowOverrideIso,
+    simAnchorIso,
+    simRealAnchorIso,
+    simSpeed,
   };
 };
 

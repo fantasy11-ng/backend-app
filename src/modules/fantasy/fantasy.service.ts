@@ -19,6 +19,7 @@ import { PlayersService } from '@/modules/players/players.service';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
 import { FantasyConfig } from '@/common/config/fantasy.config';
+import { FantasyTimeService } from './fantasy-time.service';
 import { mapPlayerToPositionCode, parseFormation } from './fantasy.utils';
 import {
   FantasyBoostType,
@@ -70,26 +71,19 @@ export class FantasyService {
     private readonly fixtureRepo: Repository<Fixture>,
     @InjectRepository(FootballTeam)
     private readonly footballTeamRepo: Repository<FootballTeam>,
+    private readonly fantasyTimeService: FantasyTimeService,
   ) {
     this.fantasyConfig = this.configService.get('fantasy', { infer: true })!;
+  }
+
+  private getNow(): Date {
+    return this.fantasyTimeService.getNow();
   }
 
   private ensureOwnership(team: FantasyTeam, user: User) {
     if (team.ownerId !== user.id) {
       throw new ForbiddenException('You do not own this fantasy team');
     }
-  }
-
-  private getNow(): Date {
-    const iso = this.fantasyConfig.nowOverrideIso;
-    if (!iso) return new Date();
-
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) {
-      // Fail safe: if misconfigured, behave like normal "now"
-      return new Date();
-    }
-    return d;
   }
 
   /**
