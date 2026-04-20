@@ -1,13 +1,13 @@
 import { BadGatewayException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
-import { SportmonksLeaguesService } from 'src/common/sportmonks/services/leagues.service';
-import { SportmonksSeasonsService } from 'src/common/sportmonks/services/seasons.service';
+import { SportmonksLeaguesService } from '@/common/sportmonks/services/leagues.service';
+import { SportmonksSeasonsService } from '@/common/sportmonks/services/seasons.service';
 import { SetMainServiceLeagueDto } from './dto/set-main-service-league.dto';
 import { DataSource } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { ServiceLeague } from 'src/common/sportmonks/entities/service-league.entity';
-import { ServiceSeason } from 'src/common/sportmonks/entities/service-season.entity';
+import { ServiceLeague } from '@/common/sportmonks/entities/service-league.entity';
+import { ServiceSeason } from '@/common/sportmonks/entities/service-season.entity';
 
 @Injectable()
 export class SettingsService {

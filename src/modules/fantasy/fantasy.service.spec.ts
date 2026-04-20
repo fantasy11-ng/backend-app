@@ -17,6 +17,8 @@ import { PlayersService } from '@/modules/players/players.service';
 import { SportmonksFixturesService } from '@/common/sportmonks/services/fixtures.service';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { FootballTeam } from '@/modules/team/entities/football-team.entity';
+import { Player } from '@/modules/players/entities/player.entity';
+import { PlayerFixtureStats } from '@/modules/players/entities/player-fixture-stats.entity';
 
 describe('FantasyService', () => {
   let service: FantasyService;
@@ -31,6 +33,8 @@ describe('FantasyService', () => {
   let pointsRepo: Repository<FantasyPoints>;
   let fixtureRepo: Repository<Fixture>;
   let footballTeamRepo: Repository<FootballTeam>;
+  let playerRepo: Repository<Player>;
+  let playerFixtureStatsRepo: Repository<PlayerFixtureStats>;
   let playersService: PlayersService;
   let configService: ConfigService;
 
@@ -68,6 +72,7 @@ describe('FantasyService', () => {
             create: jest.fn(),
             delete: jest.fn(),
             save: jest.fn(),
+            find: jest.fn(),
           },
         },
         {
@@ -76,6 +81,7 @@ describe('FantasyService', () => {
             create: jest.fn(),
             save: jest.fn(),
             find: jest.fn(),
+            createQueryBuilder: jest.fn(),
           },
         },
         {
@@ -90,6 +96,7 @@ describe('FantasyService', () => {
           provide: getRepositoryToken(FantasyTeamRanking),
           useValue: {
             find: jest.fn(),
+            findOne: jest.fn(),
             create: jest.fn((x) => x),
           },
         },
@@ -130,6 +137,19 @@ describe('FantasyService', () => {
           provide: getRepositoryToken(FootballTeam),
           useValue: {
             find: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(Player),
+          useValue: {
+            findBy: jest.fn(),
+            find: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(PlayerFixtureStats),
+          useValue: {
+            createQueryBuilder: jest.fn(),
           },
         },
         {
@@ -197,6 +217,10 @@ describe('FantasyService', () => {
     fixtureRepo = module.get<Repository<Fixture>>(getRepositoryToken(Fixture));
     footballTeamRepo = module.get<Repository<FootballTeam>>(
       getRepositoryToken(FootballTeam),
+    );
+    playerRepo = module.get<Repository<Player>>(getRepositoryToken(Player));
+    playerFixtureStatsRepo = module.get<Repository<PlayerFixtureStats>>(
+      getRepositoryToken(PlayerFixtureStats),
     );
     playersService = module.get<PlayersService>(PlayersService);
     configService = module.get<ConfigService>(ConfigService);
@@ -311,6 +335,111 @@ describe('FantasyService', () => {
         cleanSheets: 7,
         budgetRemaining: 123,
       });
+    });
+  });
+
+  describe('getGlobalInsights', () => {
+    const makeQb = <T>(result: T) => {
+      const qb: any = {
+        select: jest.fn(() => qb),
+        addSelect: jest.fn(() => qb),
+        where: jest.fn(() => qb),
+        andWhere: jest.fn(() => qb),
+        groupBy: jest.fn(() => qb),
+        orderBy: jest.fn(() => qb),
+        addOrderBy: jest.fn(() => qb),
+        limit: jest.fn(() => qb),
+        innerJoin: jest.fn(() => qb),
+        getRawMany: jest.fn(async () => result),
+      };
+      return qb;
+    };
+
+    it('computes most selected/captained, transfers, and top performer for the latest locked gameweek', async () => {
+      const gw4 = {
+        id: 4,
+        code: '4',
+        snapshotDeadlineAt: new Date('2025-12-31T12:00:00.000Z'),
+      } as any;
+      const gw3 = {
+        id: 3,
+        code: '3',
+        snapshotDeadlineAt: new Date('2025-12-24T12:00:00.000Z'),
+      } as any;
+
+      (gameweekRepo.find as any)
+        .mockResolvedValueOnce([gw4]) // latest locked
+        .mockResolvedValueOnce([gw3]); // previous
+
+      (squadRepo.find as any).mockResolvedValueOnce([
+        { id: 's1' },
+        { id: 's2' },
+      ]);
+
+      (squadPlayerRepo.find as any).mockResolvedValueOnce([
+        { squadId: 's1', playerId: 1, isCaptain: true },
+        { squadId: 's1', playerId: 2, isCaptain: false },
+        { squadId: 's2', playerId: 1, isCaptain: false },
+        { squadId: 's2', playerId: 3, isCaptain: true },
+      ]);
+
+      const transferQb = makeQb([
+        { playerId: '2', value: '5' },
+        { playerId: '1', value: '3' },
+      ]);
+      (transferRepo.createQueryBuilder as any).mockReturnValue(transferQb);
+
+      const performerQb = makeQb([
+        { playerId: '3', value: '18' },
+        { playerId: '1', value: '12' },
+      ]);
+      (playerFixtureStatsRepo.createQueryBuilder as any).mockReturnValue(
+        performerQb,
+      );
+
+      (playerRepo.findBy as any).mockResolvedValue([
+        {
+          id: 1,
+          name: 'Mbappé',
+          commonName: 'Mbappé',
+          image: 'p1.png',
+          pool: 'A',
+          position: { code: 'FWD' },
+          points: 100,
+        },
+        {
+          id: 2,
+          name: 'Kane',
+          commonName: 'Kane',
+          image: 'p2.png',
+          pool: 'A',
+          position: { code: 'FWD' },
+          points: 90,
+        },
+        {
+          id: 3,
+          name: 'De Bruyne',
+          commonName: 'De Bruyne',
+          image: 'p3.png',
+          pool: 'A',
+          position: { code: 'MID' },
+          points: 110,
+        },
+      ]);
+
+      const res = await service.getGlobalInsights();
+
+      expect(res.mostSelected.gameweekId).toBe(4);
+      expect(res.mostSelected.items[0].player.id).toBe(1);
+      expect(res.mostSelected.items[0].metricValue).toBe(100); // 2/2 squads
+
+      expect(res.mostCaptained.items[0].metricValue).toBe(50); // 1/2 squads
+      expect(res.mostTransferred.items[0].player.id).toBe(2);
+      expect(res.mostTransferred.items[0].metricValue).toBe(5);
+
+      expect(res.bestPerforming.gameweekId).toBe(4);
+      expect(res.bestPerforming.items[0].player.id).toBe(3);
+      expect(res.bestPerforming.items[0].metricValue).toBe(18);
     });
   });
 

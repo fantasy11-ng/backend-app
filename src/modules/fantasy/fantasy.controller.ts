@@ -56,6 +56,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { FantasyTransfer } from './entities/fantasy-transfer.entity';
+import { GlobalInsightsResponseDto } from './dto';
 
 @ApiTags('Fantasy')
 @Controller('fantasy')
@@ -67,6 +68,20 @@ export class FantasyController {
     private readonly tournamentResetService: TournamentResetService,
     private readonly fantasyTimeService: FantasyTimeService,
   ) {}
+
+  @Get('insights')
+  @ApiOperation({
+    summary: 'Get global league insights',
+    description:
+      'Returns global top-player widgets such as most selected, most captained, most transferred in, and best performing.',
+  })
+  @ApiOkResponse({
+    description: 'Global insights payload',
+    type: GlobalInsightsResponseDto,
+  })
+  async getGlobalInsights() {
+    return this.fantasyService.getGlobalInsights();
+  }
 
   @Post('team')
   @ApiOperation({

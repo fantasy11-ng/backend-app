@@ -24,6 +24,40 @@ export type SportmonksPlayer = {
     developer_name: string;
     model_type: string;
   };
+  statistics?: SportmonksPlayerStatistic[];
+};
+
+export type SportmonksPlayerStatisticType = {
+  id: number;
+  name: string;
+  code: string;
+  developer_name: string;
+  model_type: string;
+  stat_group: string;
+};
+
+export type SportmonksPlayerStatisticDetail = {
+  id: number;
+  player_statistic_id: number;
+  type_id: number;
+  value:
+    | number
+    | null
+    | {
+        total?: number | null;
+        [key: string]: number | string | null | undefined;
+      };
+  type?: SportmonksPlayerStatisticType;
+};
+
+export type SportmonksPlayerStatistic = {
+  id: number;
+  player_id: number;
+  team_id: number;
+  season_id: number;
+  position_id: number | null;
+  jersey_number: number | null;
+  details?: SportmonksPlayerStatisticDetail[];
 };
 
 export type SportmonksTeamPlayer = {
