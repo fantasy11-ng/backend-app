@@ -7,3 +7,5 @@ export * from './transfer-request.dto';
 export * from './create-league.dto';
 export * from './join-league.dto';
 export * from './league-response.dto';
+export * from './insights-response.dto';
+export * from './league-insights-response.dto';

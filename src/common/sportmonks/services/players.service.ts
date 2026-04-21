@@ -17,14 +17,21 @@ export class SportmonksPlayersService {
     private smCoreService: SportmonksCoreService,
   ) {}
 
-  async getPlayerById(playerId: number) {
+  async getPlayerById(
+    playerId: number,
+    options?: {
+      include?: string;
+      filters?: string;
+    },
+  ) {
     try {
       const { data } = await firstValueFrom(
         this.http.get<SportmonksResponse<SportmonksPlayer>>(
           `/football/players/${playerId}`,
           {
             params: {
-              include: 'position',
+              include: options?.include ?? 'position',
+              filters: options?.filters,
             },
           },
         ),

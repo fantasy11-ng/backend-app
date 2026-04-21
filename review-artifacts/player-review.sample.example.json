@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "autoPickCurrentSeason": true,
+  "player": {
+    "id": 0,
+    "name": "",
+    "commonName": "",
+    "image": "",
+    "pool": "",
+    "positionId": 0,
+    "position": {
+      "id": 0,
+      "name": "",
+      "code": "",
+      "developer_name": ""
+    },
+    "countryId": 0,
+    "externalId": null,
+    "rating": 0,
+    "price": 0
+  },
+  "seasonStats": {
+    "points": 0,
+    "goals": 0,
+    "assists": 0,
+    "yellowCards": 0,
+    "redCards": 0,
+    "minutesPlayed": null,
+    "appearances": null,
+    "lineups": null,
+    "starts": null,
+    "bench": null,
+    "shotsOnTarget": null,
+    "keyPasses": null
+  },
+  "recentFixtureStats": [
+    {
+      "fixtureId": 0,
+      "minutesPlayed": 0,
+      "goals": 0,
+      "assists": 0,
+      "yellowCards": 0,
+      "redCards": 0,
+      "fantasyPoints": 0,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "derivedInsightInputs": {
+    "ownership": {
+      "selectedTeams": 0,
+      "totalTeams": 0
+    },
+    "transferDemand": {
+      "transferIns": 0,
+      "transferOuts": 0,
+      "totalTeams": 0,
+      "lookbackDays": 7
+    }
+  },
+  "derivedInsightMetrics": {
+    "ownership": null,
+    "priceChange": null,
+    "form": null,
+    "performanceIndex": null
+  }
+}
+

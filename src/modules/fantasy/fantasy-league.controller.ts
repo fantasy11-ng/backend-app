@@ -21,6 +21,7 @@ import {
   CreateFantasyLeagueResponseDto,
   MyFantasyLeaguesResponseDto,
   FantasyLeagueLeaderboardResponseDto,
+  LeagueInsightsResponseDto,
 } from './dto';
 import {
   ApiBody,
@@ -146,6 +147,28 @@ export class FantasyLeagueController {
   })
   async getMyLeagues(@Req() req: Request) {
     return this.leaguesService.getMyLeagues(req.user as User);
+  }
+
+  @Get(':leagueId/insights')
+  @ApiOperation({
+    summary: 'Get league insights',
+    description:
+      'Returns top 5 league table rows (with position change) plus league-scoped top-player widgets (most selected, most captained, most transferred, best performing).',
+  })
+  @ApiParam({
+    name: 'leagueId',
+    type: String,
+    description: 'ID of the league',
+  })
+  @ApiOkResponse({
+    description: 'League insights payload',
+    type: LeagueInsightsResponseDto,
+  })
+  async getLeagueInsights(
+    @Req() req: Request,
+    @Param('leagueId') leagueId: string,
+  ) {
+    return this.leaguesService.getLeagueInsights(req.user as User, leagueId);
   }
 
   @Get(':leagueId/leaderboard/season')

@@ -57,6 +57,27 @@ export class Player {
   @Column({ default: 0 })
   points: number;
 
+  @Column({ type: 'int', nullable: true })
+  minutesPlayed?: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  appearances?: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  lineups?: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  starts?: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  bench?: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  shotsOnTarget?: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  keyPasses?: number | null;
+
   // Transfer market price (e.g. in smallest currency unit)
   @Column({ type: 'int', default: 0 })
   price: number;
