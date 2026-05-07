@@ -15,7 +15,9 @@ describe('PlayersService', () => {
   let find: jest.Mock;
   let createQueryBuilderWhereInIds: jest.Mock;
   let createQueryBuilderGetMany: jest.Mock;
+  let createQueryBuilderInnerJoin: jest.Mock;
   let createQueryBuilderWhere: jest.Mock;
+  let createQueryBuilderAndWhere: jest.Mock;
   let createQueryBuilderOrderBy: jest.Mock;
   let createQueryBuilderTake: jest.Mock;
   let createQueryBuilderGetManyRecent: jest.Mock;
@@ -43,8 +45,14 @@ describe('PlayersService', () => {
     createQueryBuilderOrderBy = jest.fn(() => ({
       take: createQueryBuilderTake,
     }));
-    createQueryBuilderWhere = jest.fn(() => ({
+    createQueryBuilderAndWhere = jest.fn(() => ({
       orderBy: createQueryBuilderOrderBy,
+    }));
+    createQueryBuilderWhere = jest.fn(() => ({
+      andWhere: createQueryBuilderAndWhere,
+    }));
+    createQueryBuilderInnerJoin = jest.fn(() => ({
+      where: createQueryBuilderWhere,
     }));
     sportmonksPlayersService = {
       getCountries: jest.fn(async () => []),
@@ -107,7 +115,7 @@ describe('PlayersService', () => {
               if (entity === PlayerFixtureStats) {
                 return {
                   createQueryBuilder: jest.fn(() => ({
-                    where: createQueryBuilderWhere,
+                    innerJoin: createQueryBuilderInnerJoin,
                   })),
                 };
               }

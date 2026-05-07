@@ -1,6 +1,6 @@
 import type { PlayerFixtureStats } from './entities/player-fixture-stats.entity';
 
-export const PLAYER_INSIGHTS_FORM_LOOKBACK = 5;
+export const PLAYER_INSIGHTS_FORM_LOOKBACK = 3;
 export const PLAYER_INSIGHTS_PRICE_CHANGE_LOOKBACK_DAYS = 7;
 export const PLAYER_INSIGHTS_MAX_PRICE_CHANGE = 250_000;
 export const PLAYER_INSIGHTS_TRANSFER_DEMAND_RATIO_CAP = 0.2;

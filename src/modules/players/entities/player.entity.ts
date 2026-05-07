@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ApiProperty } from '@nestjs/swagger';
 
 @Entity()
 @Index(['externalId'], { unique: true })
@@ -81,6 +82,14 @@ export class Player {
   // Transfer market price (e.g. in smallest currency unit)
   @Column({ type: 'int', default: 0 })
   price: number;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Avg fantasy points over last 3 played fixtures. Computed at read time, not persisted.',
+    example: 6.7,
+  })
+  form?: number | null;
 
   @CreateDateColumn()
   createdAt: Date;

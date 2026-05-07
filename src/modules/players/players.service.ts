@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { SportmonksPlayersService } from '@/common/sportmonks/services/players.service';
 import { DataSource, IsNull } from 'typeorm';
+import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { Player } from './entities/player.entity';
 import { CreatePlayerDto } from './dto/create-player.dto';
 import { FootballService } from '@/common/football/services/football.service';
@@ -339,18 +340,57 @@ export class PlayersService {
 
   async getPlayers(query: PaginateQuery): Promise<Paginated<Player>> {
     const qb = this.db.getRepository(Player).createQueryBuilder('player');
-    return paginate(query, qb, PLAYER_PAGINATION_CONFIG);
+    const result = await paginate(query, qb, PLAYER_PAGINATION_CONFIG);
+
+    if (result.data.length) {
+      const playerIds = result.data.map((p) => p.id);
+      const formRows = await this.db.query<
+        { playerId: number; form: string }[]
+      >(
+        `
+        SELECT t."playerId", ROUND(AVG(t."fantasyPoints")::numeric, 1) AS form
+        FROM (
+          SELECT pfs."playerId",
+                 pfs."fantasyPoints",
+                 ROW_NUMBER() OVER (
+                   PARTITION BY pfs."playerId"
+                   ORDER BY f."startingAt" DESC
+                 ) AS rn
+          FROM player_fixture_stats pfs
+          INNER JOIN fixture f ON f.id = pfs."fixtureId"
+          WHERE pfs."playerId" = ANY($1::int[])
+            AND pfs."minutesPlayed" > 0
+            AND f."startingAt" <= NOW()
+        ) t
+        WHERE t.rn <= 3
+        GROUP BY t."playerId"
+        `,
+        [playerIds],
+      );
+
+      const formByPlayerId = new Map(
+        formRows.map((row) => [Number(row.playerId), Number(row.form)]),
+      );
+
+      for (const player of result.data) {
+        player.form = formByPlayerId.get(player.id) ?? 0;
+      }
+    }
+
+    return result;
   }
 
   private async getRecentFixtureStats(
     playerId: number,
-    limit = 5,
+    limit = 3,
   ): Promise<PlayerFixtureStats[]> {
     return await this.db
       .getRepository(PlayerFixtureStats)
       .createQueryBuilder('stats')
+      .innerJoin(Fixture, 'fixture', 'fixture.id = stats.fixtureId')
       .where('stats.playerId = :playerId', { playerId })
-      .orderBy('stats.fixtureId', 'DESC')
+      .andWhere('fixture.startingAt <= NOW()')
+      .orderBy('fixture.startingAt', 'DESC')
       .take(limit)
       .getMany();
   }

@@ -207,7 +207,7 @@ describe('player insights mapper', () => {
 
     expect(dto.insights.ownership).toBe(18);
     expect(dto.insights.priceChange).toBe(125000);
-    expect(dto.insights.form).toBe(9);
+    expect(dto.insights.form).toBe(10); // lookback=3: top 3 of [1→7,2→8,3→9,4→10,5→11] = avg(11,10,9)
     expect(dto.insights.performanceIndex).toBe(72.25);
   });
 

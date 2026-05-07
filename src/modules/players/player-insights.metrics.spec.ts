@@ -93,8 +93,8 @@ describe('player insights metrics', () => {
             { fixtureId: 7, fantasyPoints: 11, minutesPlayed: 90 },
           ],
         }),
-      ).toBe(7.6);
-      expect(PLAYER_INSIGHTS_FORM_LOOKBACK).toBe(5);
+      ).toBe(8.67); // top 3 by fixtureId (excluding id=6 which has 0min/0pts): ids 7,5,4 → avg(11,9,6)
+      expect(PLAYER_INSIGHTS_FORM_LOOKBACK).toBe(3);
     });
 
     it('returns null when no relevant recent fixtures are available', () => {
