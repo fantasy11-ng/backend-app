@@ -12,6 +12,8 @@ import { StagesModule } from '../stages/stages.module';
 import { User } from '@/modules/users/entities/user.entity';
 import { PredictorScoringService } from './services/scoring.service';
 import { SeedingRulesService } from './services/seeding-rules.service';
+import { BracketEngineService } from './bracket/bracket-engine.service';
+import { BracketSpecProviderService } from './bracket/bracket-spec-provider.service';
 
 @Module({
   imports: [
@@ -27,6 +29,12 @@ import { SeedingRulesService } from './services/seeding-rules.service';
     StagesModule,
   ],
   controllers: [PredictorController],
-  providers: [PredictorService, PredictorScoringService, SeedingRulesService],
+  providers: [
+    PredictorService,
+    PredictorScoringService,
+    SeedingRulesService,
+    BracketEngineService,
+    BracketSpecProviderService,
+  ],
 })
 export class PredictorModule {}

@@ -11,6 +11,7 @@ import { SportmonksStandingsService } from '@/common/sportmonks/services/standin
 const POINTS = {
   groupCorrectPosition: 1,
   groupAllCorrect: 5,
+  r32Winner: 1,
   r16Winner: 2,
   qfWinner: 3,
   sfWinner: 4,
@@ -43,6 +44,7 @@ export class PredictorScoringService {
 
     const total =
       groupPoints.total +
+      (knockout.r32?.total ?? 0) +
       knockout.r16.total +
       knockout.qf.total +
       knockout.sf.total +
@@ -150,7 +152,9 @@ export class PredictorScoringService {
         await this.smStagesService.getSeasonStages(seasonId);
 
       // Sportmonks uses "knock-out" type for all KO stages; distinguish by name.
+      // Supports generic "Round of N" (e.g. "Round of 32", "Round of 16") via regex.
       const matcherByRound: Record<string, (name: string) => boolean> = {
+        r32: (name: string) => /round of 32/i.test(name),
         r16: (name: string) => /round of 16/i.test(name),
         qf: (name: string) =>
           /quarter/i.test(name) && /final/i.test(name) && !/semi/i.test(name),
@@ -159,6 +163,7 @@ export class PredictorScoringService {
         final: (name: string) =>
           /final/i.test(name) &&
           !/round of 16/i.test(name) &&
+          !/round of 32/i.test(name) &&
           !/quarter/i.test(name) &&
           !/semi/i.test(name) &&
           !/3rd|third/i.test(name),
@@ -197,7 +202,8 @@ export class PredictorScoringService {
       };
     };
 
-    const [r16, qf, sf, fin, third] = await Promise.all([
+    const [r32, r16, qf, sf, fin, third] = await Promise.all([
+      scoreRound('r32', POINTS.r32Winner),
       scoreRound('r16', POINTS.r16Winner),
       scoreRound('qf', POINTS.qfWinner),
       scoreRound('sf', POINTS.sfWinner),
@@ -206,6 +212,7 @@ export class PredictorScoringService {
     ]);
 
     return {
+      r32: { total: r32.points, detail: r32 },
       r16: { total: r16.points, detail: r16 },
       qf: { total: qf.points, detail: qf },
       sf: { total: sf.points, detail: sf },

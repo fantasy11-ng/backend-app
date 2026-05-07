@@ -125,9 +125,9 @@ export class PredictorController {
   @ApiOperation({
     summary: 'Submit bracket predictions for a round',
     description:
-      "Submit winners for the specified round. Round codes: 'r16' | 'qf' | 'sf' | 'final'.",
+      "Submit winners for the specified round. Round codes: 'r32' | 'r16' | 'qf' | 'sf' | 'final'. Use GET /predictor/bracket/rounds to get available rounds for the active season.",
   })
-  @ApiParam({ name: 'roundCode', enum: ['r16', 'qf', 'sf', 'final'] })
+  @ApiParam({ name: 'roundCode', enum: ['r32', 'r16', 'qf', 'sf', 'final'] })
   @ApiBody({ type: BracketPredictionDto })
   @ApiOkResponse({
     description: 'Saved bracket predictions',
@@ -188,16 +188,41 @@ export class PredictorController {
     return this.predictorService.getGroupsWithMine(req.user as User);
   }
 
+  @Get('bracket/rounds')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get available knockout rounds for the active season',
+    description:
+      'Returns ordered list of round codes and expected match counts for the active season. Use this to render the bracket dynamically.',
+  })
+  @ApiOkResponse({
+    description: 'Available rounds',
+    schema: {
+      example: [
+        { roundCode: 'r32', expectedMatchCount: 16 },
+        { roundCode: 'r16', expectedMatchCount: 8 },
+        { roundCode: 'qf', expectedMatchCount: 4 },
+        { roundCode: 'sf', expectedMatchCount: 2 },
+        { roundCode: 'final', expectedMatchCount: 1 },
+        { roundCode: 'third-place', expectedMatchCount: 1 },
+      ],
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  getAvailableRounds() {
+    return this.predictorService.getAvailableRounds();
+  }
+
   @Get('bracket/:roundCode/seed')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get seeded participants for a round',
     description:
-      "Computes participants based on prior user predictions. Returns pairs for bracket rendering: 'r16' uses competition-specific seeding rules, while 'qf', 'sf', and 'final' pair winners sequentially from the previous round.",
+      'Computes participants based on prior user predictions. Uses competition-specific seeding rules for the first knockout round (r32 for WC2026, r16 for classic WC/AFCON/UCL). Subsequent rounds use bracket-spec winner-of mapping.',
   })
   @ApiParam({
     name: 'roundCode',
-    enum: ['r16', 'qf', 'sf', 'final', 'third-place'],
+    enum: ['r32', 'r16', 'qf', 'sf', 'final', 'third-place'],
   })
   @ApiOkResponse({
     description: 'Seeded participants and pairs',
@@ -247,6 +272,7 @@ export class PredictorController {
           ],
         },
         knockout: {
+          r32: { total: 4 },
           r16: { total: 8 },
           qf: { total: 9 },
           sf: { total: 8 },
@@ -268,7 +294,7 @@ export class PredictorController {
     summary: 'Get my bracket predictions for a round',
     description: "Reads back the user's submitted winners for the given round.",
   })
-  @ApiParam({ name: 'roundCode', enum: ['r16', 'qf', 'sf', 'final'] })
+  @ApiParam({ name: 'roundCode', enum: ['r32', 'r16', 'qf', 'sf', 'final'] })
   @ApiOkResponse({
     description: 'List of fixture predictions',
     schema: {

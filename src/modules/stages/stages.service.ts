@@ -14,6 +14,12 @@ import { FantasyGameweek } from '@/modules/fantasy/entities/fantasy-gameweek.ent
 import { FantasyGameweekPhase } from '@/modules/fantasy/fantasy.types';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
+import {
+  isKnockoutStageCode,
+  normalizeStageCode,
+  roundCodeToStageCode,
+  stageCodeToRoundCode,
+} from './stage-code.utils';
 
 @Injectable()
 export class StagesService {
@@ -48,29 +54,8 @@ export class StagesService {
     const stagesRepo = this.db.getRepository(Stage);
 
     for (const stage of stages) {
-      // Derive a more specific internal code per stage instead of relying only on type.code.
-      // Sportmonks uses "group-stage" for group phases and "knock-out" for all KO phases,
-      // so we normalize by name to distinguish r16, qf, sf, final, third-place, etc.
-      const nameLower = (stage.name || '').toLowerCase();
-      let internalCode = stage.type.code; // default fallback
-
-      if (stage.type.code === 'group-stage') {
-        internalCode = 'group-stage';
-      } else if (nameLower.includes('round of 16')) {
-        internalCode = 'round-of-16';
-      } else if (nameLower.includes('quarter') && nameLower.includes('final')) {
-        internalCode = 'quarter-finals';
-      } else if (nameLower.includes('semi') && nameLower.includes('final')) {
-        internalCode = 'semi-finals';
-      } else if (
-        (nameLower.includes('3rd') || nameLower.includes('third')) &&
-        nameLower.includes('place')
-      ) {
-        internalCode = 'third-place';
-      } else if (nameLower.includes('final')) {
-        // Plain "Final" without 3rd/semi/quarter wording
-        internalCode = 'final';
-      }
+      // Normalize to a stable internal code (supports "round-of-32", "round-of-16", etc.)
+      const internalCode = normalizeStageCode(stage.type.code, stage.name);
 
       await stagesRepo.save({
         id: stage.id,
@@ -265,6 +250,7 @@ export class StagesService {
     const stages = await stageRepo.find({
       where: { externalSeasonId: seasonId },
     });
+
     const stageById = new Map(stages.map((s) => [s.id, s]));
     const stageByCode = new Map(stages.map((s) => [s.code, s]));
 
@@ -319,16 +305,10 @@ export class StagesService {
     }
 
     // 2) Knockout gameweeks from stages + fixtures
-    const knockoutStageCodes = new Set([
-      'round-of-16',
-      'quarter-finals',
-      'semi-finals',
-      'final',
-      'third-place',
-    ]);
-
+    // isKnockoutStageCode() handles all "round-of-N" codes dynamically (e.g. round-of-32)
+    // as well as named KO stages (quarter-finals, semi-finals, final, third-place).
     for (const stage of stages) {
-      if (!knockoutStageCodes.has(stage.code)) continue;
+      if (!isKnockoutStageCode(stage.code)) continue;
 
       const firstKickoff = firstKickoffByStage.get(stage.id);
       if (!firstKickoff) continue; // stage exists but fixtures aren't available locally yet
@@ -484,19 +464,11 @@ export class StagesService {
   }
 
   /**
-   * Get fixtures for a knockout round by internal round code and season.
-   * Round codes: 'r16' | 'qf' | 'sf' | 'final' | 'third-place'
+   * Get fixtures for a knockout round by predictor round code and season.
+   * Supports any "rN" code (e.g. 'r32', 'r16') plus 'qf', 'sf', 'final', 'third-place'.
    */
   async getFixturesForRound(roundCode: string, seasonId: number) {
-    const stageCodeMap: Record<string, string> = {
-      r16: 'round-of-16',
-      qf: 'quarter-finals',
-      sf: 'semi-finals',
-      final: 'final',
-      'third-place': 'third-place',
-    };
-
-    const stageCode = stageCodeMap[roundCode];
+    const stageCode = roundCodeToStageCode(roundCode);
     if (!stageCode) return [];
 
     const stageRepo = this.db.getRepository(Stage);
@@ -514,5 +486,64 @@ export class StagesService {
         id: 'ASC',
       },
     });
+  }
+
+  /**
+   * Returns an ordered list of predictor round codes present in the DB for a season.
+   * Order: descending by N for "rN" rounds (so r32 before r16), then qf → sf → final,
+   * with third-place last.
+   *
+   * Example for WC2026: ['r32', 'r16', 'qf', 'sf', 'final', 'third-place']
+   * Example for WC2022: ['r16', 'qf', 'sf', 'final', 'third-place']
+   */
+  async getKnockoutRoundsForSeason(seasonId: number): Promise<string[]> {
+    const stageRepo = this.db.getRepository(Stage);
+    const stages = await stageRepo.find({
+      where: { externalSeasonId: seasonId },
+    });
+
+    const roundNSizes: number[] = [];
+    const named: string[] = [];
+
+    for (const stage of stages) {
+      const roundCode = stageCodeToRoundCode(stage.code);
+      if (!roundCode) continue;
+
+      const m = roundCode.match(/^r(\d+)$/);
+      if (m) {
+        roundNSizes.push(Number(m[1]));
+      } else if (
+        roundCode === 'qf' ||
+        roundCode === 'sf' ||
+        roundCode === 'final' ||
+        roundCode === 'third-place'
+      ) {
+        named.push(roundCode);
+      }
+    }
+
+    // Sort rN rounds largest first (r32 before r16)
+    roundNSizes.sort((a, b) => b - a);
+    const rNRounds = roundNSizes.map((n) => `r${n}`);
+
+    // Sort named rounds in logical bracket order
+    const namedOrder = ['qf', 'sf', 'final', 'third-place'];
+    named.sort((a, b) => namedOrder.indexOf(a) - namedOrder.indexOf(b));
+
+    return [...rNRounds, ...named];
+  }
+
+  /**
+   * Returns the expected number of matches (= fixtures) for a given round code,
+   * derived from the stage size implied by the round code.
+   */
+  expectedMatchCount(roundCode: string): number {
+    const m = roundCode.match(/^r(\d+)$/);
+    if (m) return Number(m[1]) / 2;
+    if (roundCode === 'qf') return 4;
+    if (roundCode === 'sf') return 2;
+    if (roundCode === 'final') return 1;
+    if (roundCode === 'third-place') return 1;
+    return 0;
   }
 }

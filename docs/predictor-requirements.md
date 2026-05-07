@@ -1,7 +1,7 @@
 ## Predictor Feature - Requirements Specification
 
 ### Overview
-The Predictor feature allows users to forecast outcomes throughout a tournament: Group Stage → Round of 16 → Quarterfinals → Semifinals → Final. Users must complete predictions for the current stage before progressing to the next. Sports data, including leagues, seasons, stages, groups, fixtures, and teams, is sourced from Sportmonks Football API v3.
+The Predictor feature allows users to forecast outcomes throughout a tournament: Group Stage → (Round of 32?) → Round of 16 → Quarterfinals → Semifinals → Final. Whether a Round of 32 exists depends on competition format (WC2026 starts at R32; WC2022 and others start at R16). Users must complete predictions for the current stage before progressing to the next. Sports data, including leagues, seasons, stages, groups, fixtures, and teams, is sourced from Sportmonks Football API v3.
 
 This feature must support multiple competitions (e.g., AFCON, FIFA World Cup 2026, UEFA Champions League) and adapt to each competition’s stage structure and seeding rules.
 
@@ -48,8 +48,9 @@ This feature must support multiple competitions (e.g., AFCON, FIFA World Cup 202
 2) Prediction flow and gating
 - Group Stage:
   - Users submit one prediction per group per stage, specifying winner and runner‑up (and optionally full ordering as needed by UI).
-  - Users must complete predictions for all groups before Round of 16 becomes available for that season.
-- Knockout rounds (R16 → QF → SF → Final):
+  - Users must complete predictions for all groups before the first knockout round (R32 or R16 depending on format) becomes available.
+  - For competitions with 12 groups (WC2026): 8 third-placed teams qualify alongside 24 automatic qualifiers. The user must submit a ranked list of third-placed teams before the Round of 32 bracket is seeded.
+- Knockout rounds ((R32?) → R16 → QF → SF → Final):
   - Users submit a winner for each fixture node in the bracket for the given round.
   - Users must complete the current knockout round before the next round becomes available.
   - Bracket seeding is derived from group predictions and/or official tournament mapping rules. For competitions where Sportmonks provides bracket relationships, the system should map them directly; otherwise we’ll provide a configuration map per competition.
@@ -154,7 +155,8 @@ Missing or partial:
 ### Glossary
 - League: A competition (e.g., AFCON, FIFA World Cup, UCL).
 - Season: A specific edition of a league (e.g., AFCON 2025, World Cup 2026).
-- Stage: A tournament phase (group-stage, round-of-16, quarterfinals, semifinals, final).
+- Stage: A tournament phase (group-stage, round-of-32, round-of-16, quarterfinals, semifinals, final). Round-of-N stages are identified dynamically; presence of round-of-32 depends on competition format.
+- BracketSpec: An ordered list of match templates for a knockout round, expressed as explicit source references (groupPlacement, winnerOf, loserOf, thirdPlaceAnnexC) rather than sequential pairing assumptions.
 - Group: Subdivision within the group stage containing multiple teams.
 - Fixture: A match between two teams at a scheduled date/time.
 - Bracket: The structure connecting knockout fixtures from one round to the next.
