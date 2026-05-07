@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { DataSource, In } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   BracketContext,
   BracketMatch,
@@ -18,11 +20,23 @@ import { Group } from '@/modules/stages/entities/group.entity';
 import { User } from '@/modules/users/entities/user.entity';
 import { StagesService } from '@/modules/stages/stages.service';
 
-// Annex C JSON is a map: key = sorted 8-letter string of qualifying groups,
+// Annex C JSON: key = sorted 8-letter string of qualifying groups,
 // value = { '1A': 'E', '1B': 'J', ... } mapping slot label → group letter.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// We load it via fs.readFileSync so the path resolves correctly in both
+// ts-node (dev) and compiled dist/ (production) environments.
+function loadAnnexC(): Record<string, Record<string, string>> {
+  const jsonPath = path.join(__dirname, '..', 'data', 'wc2026-annex-c.json');
+  try {
+    return JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  } catch {
+    // Fallback: try relative to cwd (for environments where __dirname differs)
+    const cwdPath = path.join(process.cwd(), 'src', 'modules', 'predictor', 'data', 'wc2026-annex-c.json');
+    return JSON.parse(fs.readFileSync(cwdPath, 'utf8'));
+  }
+}
+
 const ANNEX_C_TABLES: Record<string, Record<string, Record<string, string>>> = {
-  wc2026: require('../data/wc2026-annex-c.json'),
+  wc2026: loadAnnexC(),
 };
 
 @Injectable()
