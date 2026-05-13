@@ -63,17 +63,17 @@ export const worldCup32Spec: BracketSpec[] = [
     ],
   },
   {
-    roundCode: 'final',
-    expectedPredictionCount: 1,
-    matches: [
-      { home: { type: 'winnerOf', round: 'sf', matchIndex: 0 }, away: { type: 'winnerOf', round: 'sf', matchIndex: 1 } },
-    ],
-  },
-  {
     roundCode: 'third-place',
     expectedPredictionCount: 1,
     matches: [
       { home: { type: 'loserOf', round: 'sf', matchIndex: 0 }, away: { type: 'loserOf', round: 'sf', matchIndex: 1 } },
+    ],
+  },
+  {
+    roundCode: 'final',
+    expectedPredictionCount: 1,
+    matches: [
+      { home: { type: 'winnerOf', round: 'sf', matchIndex: 0 }, away: { type: 'winnerOf', round: 'sf', matchIndex: 1 } },
     ],
   },
 ];

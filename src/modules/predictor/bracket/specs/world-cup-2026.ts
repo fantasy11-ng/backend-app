@@ -213,6 +213,17 @@ export const worldCup2026Spec: BracketSpec[] = [
   },
 
   // --------------------------------------------------------------------------
+  // Third-place match (before Final — SF losers play before SF winners)
+  // --------------------------------------------------------------------------
+  {
+    roundCode: 'third-place',
+    expectedPredictionCount: 1,
+    matches: [
+      { home: { type: 'loserOf', round: 'sf', matchIndex: 0 }, away: { type: 'loserOf', round: 'sf', matchIndex: 1 } },
+    ],
+  },
+
+  // --------------------------------------------------------------------------
   // Final
   // --------------------------------------------------------------------------
   {
@@ -220,17 +231,6 @@ export const worldCup2026Spec: BracketSpec[] = [
     expectedPredictionCount: 1,
     matches: [
       { home: { type: 'winnerOf', round: 'sf', matchIndex: 0 }, away: { type: 'winnerOf', round: 'sf', matchIndex: 1 } },
-    ],
-  },
-
-  // --------------------------------------------------------------------------
-  // Third-place match
-  // --------------------------------------------------------------------------
-  {
-    roundCode: 'third-place',
-    expectedPredictionCount: 1,
-    matches: [
-      { home: { type: 'loserOf', round: 'sf', matchIndex: 0 }, away: { type: 'loserOf', round: 'sf', matchIndex: 1 } },
     ],
   },
 ];

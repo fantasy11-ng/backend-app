@@ -490,11 +490,10 @@ export class StagesService {
 
   /**
    * Returns an ordered list of predictor round codes present in the DB for a season.
-   * Order: descending by N for "rN" rounds (so r32 before r16), then qf → sf → final,
-   * with third-place last.
+   * Order: descending by N for "rN" rounds (so r32 before r16), then qf → sf → third-place → final.
    *
-   * Example for WC2026: ['r32', 'r16', 'qf', 'sf', 'final', 'third-place']
-   * Example for WC2022: ['r16', 'qf', 'sf', 'final', 'third-place']
+   * Example for WC2026: ['r32', 'r16', 'qf', 'sf', 'third-place', 'final']
+   * Example for WC2022: ['r16', 'qf', 'sf', 'third-place', 'final']
    */
   async getKnockoutRoundsForSeason(seasonId: number): Promise<string[]> {
     const stageRepo = this.db.getRepository(Stage);
@@ -527,7 +526,7 @@ export class StagesService {
     const rNRounds = roundNSizes.map((n) => `r${n}`);
 
     // Sort named rounds in logical bracket order
-    const namedOrder = ['qf', 'sf', 'final', 'third-place'];
+    const namedOrder = ['qf', 'sf', 'third-place', 'final'];
     named.sort((a, b) => namedOrder.indexOf(a) - namedOrder.indexOf(b));
 
     return [...rNRounds, ...named];

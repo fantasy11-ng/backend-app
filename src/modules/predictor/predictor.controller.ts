@@ -203,8 +203,8 @@ export class PredictorController {
         { roundCode: 'r16', expectedMatchCount: 8 },
         { roundCode: 'qf', expectedMatchCount: 4 },
         { roundCode: 'sf', expectedMatchCount: 2 },
-        { roundCode: 'final', expectedMatchCount: 1 },
         { roundCode: 'third-place', expectedMatchCount: 1 },
+        { roundCode: 'final', expectedMatchCount: 1 },
       ],
     },
   })
