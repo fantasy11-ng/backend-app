@@ -54,7 +54,7 @@ export class AuthController {
 
   @Post('signup')
   @ApiOperation({ summary: 'Create a new user account' })
-  @ApiOkResponse({ type: MessageResponse })
+  @ApiOkResponse({ type: SignInResponse })
   async signUp(
     @Body(new SchemaValidator(signUpDtoSchema)) signUpDto: SignUpDto,
   ) {

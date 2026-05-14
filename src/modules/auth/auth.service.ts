@@ -22,9 +22,9 @@ export class AuthService {
     user.fullName = `${signUpDto.firstName} ${signUpDto.lastName}`.trim();
     user.password = await bcrypt.hash(signUpDto.password, 12);
 
-    await this.usersService.create(user);
+    const createdUser = await this.usersService.create(user);
 
-    return 'User created successfully';
+    return this.signIn(createdUser);
   }
 
   async signIn(user: User) {
