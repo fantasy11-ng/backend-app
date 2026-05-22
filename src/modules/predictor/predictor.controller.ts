@@ -125,9 +125,14 @@ export class PredictorController {
   @ApiOperation({
     summary: 'Submit bracket predictions for a round',
     description:
-      "Submit winners for the specified round. Round codes: 'r32' | 'r16' | 'qf' | 'sf' | 'final'. Use GET /predictor/bracket/rounds to get available rounds for the active season.",
+      "Submit winners for the specified round. Round codes: 'r32' | 'r16' | 'qf' | 'sf' | 'third-place' | 'final'. " +
+      'For third-place, submit the predicted winner of the third-place playoff (same body shape as other rounds, a single prediction). ' +
+      'Use GET /predictor/bracket/rounds to discover available rounds for the active season.',
   })
-  @ApiParam({ name: 'roundCode', enum: ['r32', 'r16', 'qf', 'sf', 'final'] })
+  @ApiParam({
+    name: 'roundCode',
+    enum: ['r32', 'r16', 'qf', 'sf', 'third-place', 'final'],
+  })
   @ApiBody({ type: BracketPredictionDto })
   @ApiOkResponse({
     description: 'Saved bracket predictions',
@@ -222,7 +227,7 @@ export class PredictorController {
   })
   @ApiParam({
     name: 'roundCode',
-    enum: ['r32', 'r16', 'qf', 'sf', 'final', 'third-place'],
+    enum: ['r32', 'r16', 'qf', 'sf', 'third-place', 'final'],
   })
   @ApiOkResponse({
     description: 'Seeded participants and pairs',
@@ -294,7 +299,10 @@ export class PredictorController {
     summary: 'Get my bracket predictions for a round',
     description: "Reads back the user's submitted winners for the given round.",
   })
-  @ApiParam({ name: 'roundCode', enum: ['r32', 'r16', 'qf', 'sf', 'final'] })
+  @ApiParam({
+    name: 'roundCode',
+    enum: ['r32', 'r16', 'qf', 'sf', 'third-place', 'final'],
+  })
   @ApiOkResponse({
     description: 'List of fixture predictions',
     schema: {
