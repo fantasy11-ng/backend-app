@@ -25,6 +25,12 @@ import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
 import { BracketEngineService } from './bracket/bracket-engine.service';
 import { BracketSpecProviderService } from './bracket/bracket-spec-provider.service';
+import {
+  PredictionState,
+  PredictionStatus,
+  PredictionStatusSection,
+  ROUND_LABELS,
+} from './predictor.types';
 
 @Injectable()
 export class PredictorService {
@@ -494,6 +500,128 @@ export class PredictorService {
     return this.db.getRepository(ThirdPlaceQualifiersInput).findOne({
       where: { owner: user, externalSeasonId: seasonId },
     });
+  }
+
+  /**
+   * Computes the user's overall prediction completion state across every
+   * required section of the tournament (group stage, third-placed ranking,
+   * and each knockout round). Used to drive the "Complete Your Predictions"
+   * widget and the `predictionStatus` field on the /me object.
+   */
+  async getPredictionStatus(user: User): Promise<PredictionStatus> {
+    const seasonId = await this.getCurrentSeasonId();
+
+    const override = this.configService.get('predictor.competitionOverride', {
+      infer: true,
+    }) as string;
+    const main = await this.settingsService.getMainServiceLeague();
+    const leagueName = (main?.name || '').toLowerCase();
+    const typeStr = (override as string)?.toLowerCase() || leagueName;
+
+    const groupStage = await this.stagesService.getByCode({
+      code: 'group-stage',
+    });
+    const groups = (await this.stagesService.getGroups()) as Group[];
+    const numGroups = groups.length;
+
+    const competition = this.bracketSpecProvider.detectCompetition(
+      numGroups,
+      typeStr,
+    );
+    const allSpecs = this.bracketSpecProvider.getSpecs(competition);
+    const firstKOSize = this.bracketSpecProvider.firstKnockoutSize(allSpecs);
+    const thirdSlotsRequired = Math.max(0, firstKOSize - numGroups * 2);
+
+    // Group-stage predictions (one per group)
+    const myGroupPreds = groupStage
+      ? await this.db.getRepository(Prediction).find({
+          where: { owner: user, stageId: groupStage.id },
+        })
+      : [];
+    const predictedGroupIds = new Set(myGroupPreds.map((p) => p.groupId));
+    const groupsCompleted = groups.filter((g) =>
+      predictedGroupIds.has(g.id),
+    ).length;
+
+    // Third-placed qualifiers ranking (only when slots are required)
+    let thirdPlacedCompleted = 0;
+    if (thirdSlotsRequired > 0) {
+      const thirdInput = await this.db
+        .getRepository(ThirdPlaceQualifiersInput)
+        .findOne({ where: { owner: user, externalSeasonId: seasonId } });
+      thirdPlacedCompleted =
+        (thirdInput?.ranking?.length ?? 0) >= thirdSlotsRequired ? 1 : 0;
+    }
+
+    // Knockout round predictions
+    const allFps = await this.db.getRepository(FixturePrediction).find({
+      where: { owner: user, externalSeasonId: seasonId },
+    });
+    const countByRound = new Map<string, number>();
+    for (const fp of allFps) {
+      countByRound.set(fp.roundCode, (countByRound.get(fp.roundCode) ?? 0) + 1);
+    }
+
+    const sections: PredictionStatusSection[] = [
+      {
+        key: 'group-stage',
+        label: 'Group Stage',
+        completed: groupsCompleted,
+        total: groups.length,
+      },
+    ];
+
+    if (thirdSlotsRequired > 0) {
+      sections.push({
+        key: 'third-placed-qualifiers',
+        label: 'Third-Placed Qualifiers',
+        completed: thirdPlacedCompleted,
+        total: 1,
+      });
+    }
+
+    for (const spec of allSpecs) {
+      sections.push({
+        key: spec.roundCode,
+        label: ROUND_LABELS[spec.roundCode] ?? spec.roundCode.toUpperCase(),
+        completed: Math.min(
+          countByRound.get(spec.roundCode) ?? 0,
+          spec.expectedPredictionCount,
+        ),
+        total: spec.expectedPredictionCount,
+      });
+    }
+
+    const total = sections.reduce((acc, s) => acc + s.total, 0);
+    const completed = sections.reduce((acc, s) => acc + s.completed, 0);
+    const percent = total ? Math.round((completed / total) * 100) : 0;
+    const state: PredictionState =
+      completed === 0
+        ? 'not_started'
+        : completed >= total
+          ? 'complete'
+          : 'in_progress';
+
+    return {
+      state,
+      progress: { completed, total, percent },
+      sections,
+    };
+  }
+
+  /**
+   * Safe wrapper around getPredictionStatus for contexts (e.g. /me) where a
+   * missing active season or predictor setup must not break the request.
+   */
+  async getPredictionStatusSafe(user: User): Promise<PredictionStatus | null> {
+    try {
+      return await this.getPredictionStatus(user);
+    } catch (e) {
+      this.logger.warn(
+        `Failed to compute prediction status: ${(e as Error)?.message ?? e}`,
+      );
+      return null;
+    }
   }
 
   async getCompetition() {

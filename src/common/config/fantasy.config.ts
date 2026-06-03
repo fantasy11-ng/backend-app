@@ -38,6 +38,11 @@ export const fantasyConfig = () => {
     10,
   );
 
+  const maxPlayersPerTeam = parseInt(
+    process.env.FANTASY_MAX_PLAYERS_PER_TEAM || '3',
+    10,
+  );
+
   // Optional "time travel" override for development/testing (e.g. AFCON historical data).
   // If set, fantasy endpoints will use this date as "now" for queries like upcoming fixtures.
   const nowOverrideIso = process.env.FANTASY_NOW_OVERRIDE_ISO || undefined;
@@ -77,6 +82,7 @@ export const fantasyConfig = () => {
     squadSize: 15,
     startingXiSize: 11,
     benchSize: 4,
+    maxPlayersPerTeam,
     scoring,
     transfersLocked: process.env.FANTASY_TRANSFERS_LOCKED === 'true',
     snapshotLeadMinutes,

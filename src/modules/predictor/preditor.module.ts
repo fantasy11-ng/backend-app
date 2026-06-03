@@ -36,5 +36,6 @@ import { BracketSpecProviderService } from './bracket/bracket-spec-provider.serv
     BracketEngineService,
     BracketSpecProviderService,
   ],
+  exports: [PredictorService],
 })
 export class PredictorModule {}

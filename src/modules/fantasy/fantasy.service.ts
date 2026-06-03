@@ -98,6 +98,30 @@ export class FantasyService {
     }
   }
 
+  /**
+   * Enforces the "max N players from the same team" rule. In this World Cup
+   * context a player's "team" is their national team, identified by countryId.
+   * Throws BadRequestException listing the offending team(s) when exceeded.
+   */
+  private ensureMaxPlayersPerTeam(players: Player[]) {
+    const max = this.fantasyConfig.maxPlayersPerTeam;
+    if (!max || max <= 0) return;
+
+    const countByTeam = new Map<number, number>();
+    for (const player of players) {
+      const teamId = player.countryId;
+      if (!teamId) continue;
+      countByTeam.set(teamId, (countByTeam.get(teamId) ?? 0) + 1);
+    }
+
+    const offending = [...countByTeam.values()].some((count) => count > max);
+    if (offending) {
+      throw new BadRequestException(
+        `You can select a maximum of ${max} players from the same team`,
+      );
+    }
+  }
+
   private toInsightWidgetPlayerDto(player: Player): InsightWidgetPlayerDto {
     return {
       id: player.id,
@@ -619,6 +643,8 @@ export class FantasyService {
         'You cannot have duplicate players in your team',
       );
     }
+
+    this.ensureMaxPlayersPerTeam(players);
 
     const totalCost = players.reduce((sum, p) => sum + p.price, 0);
     const initialBudget = this.fantasyConfig.initialBudget;
@@ -1432,6 +1458,8 @@ export class FantasyService {
         throw new BadRequestException('Missing player data for final squad');
       keepMap.set(pid, player);
     }
+
+    this.ensureMaxPlayersPerTeam([...keepMap.values()]);
 
     // Rebuild squad players but preserve starting/roles where possible
     const existingByPlayerId = new Map(

@@ -172,6 +172,7 @@ describe('FantasyService', () => {
               squadSize: 15,
               startingXiSize: 11,
               benchSize: 4,
+              maxPlayersPerTeam: 3,
               snapshotLeadMinutes: 120,
               nowOverrideIso: '2026-01-01T00:00:00.000Z',
               formations: [
@@ -580,6 +581,64 @@ describe('FantasyService', () => {
       const res = await service.getMyTeam(user);
       expect(res.team.id).toBe('t1');
       expect(res.currentSquad?.id).toBe('s1');
+    });
+  });
+
+  describe('createSquad - max players per team', () => {
+    const buildSquadDto = () => ({
+      formation: '4-4-2',
+      squad: Array.from({ length: 15 }, (_, i) => ({
+        playerId: i + 1,
+        isStarting: i < 11,
+      })),
+    });
+
+    // countryId acts as the national-team identifier for the max-per-team rule.
+    const buildPlayers = (countryIds: number[]) =>
+      countryIds.map((countryId, i) => ({
+        id: i + 1,
+        countryId,
+        price: 1_000_000,
+        position: { code: i === 0 ? 'GK' : 'DEF' },
+      })) as any[];
+
+    it('rejects a squad with more than 3 players from the same team', async () => {
+      const user = { id: 'u1' } as any;
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        ownerId: 'u1',
+        squads: [],
+      });
+
+      // 4 players share countryId=10 -> should be rejected.
+      const countryIds = [10, 10, 10, 10, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13];
+      (playersService.getPlayersFromIds as any).mockResolvedValueOnce(
+        buildPlayers(countryIds),
+      );
+
+      await expect(service.createSquad(user, buildSquadDto())).rejects.toThrow(
+        /maximum of 3 players from the same team/i,
+      );
+    });
+
+    it('allows a squad with at most 3 players from any single team', async () => {
+      const user = { id: 'u1' } as any;
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        ownerId: 'u1',
+        squads: [],
+      });
+
+      // At most 3 from countryId=10; passes the per-team rule and proceeds to
+      // later validation (budget), which is not the assertion under test.
+      const countryIds = [10, 10, 10, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14];
+      (playersService.getPlayersFromIds as any).mockResolvedValueOnce(
+        buildPlayers(countryIds),
+      );
+
+      await expect(
+        service.createSquad(user, buildSquadDto()),
+      ).rejects.not.toThrow(/maximum of 3 players from the same team/i);
     });
   });
 
