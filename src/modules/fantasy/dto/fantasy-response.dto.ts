@@ -79,6 +79,40 @@ export class GetBoostsResponseDto {
   boostStatuses: FantasyBoostStatusDto[];
 }
 
+export class TeamActivityBoostDto {
+  @ApiProperty({ enum: FantasyBoostType })
+  type: FantasyBoostType;
+
+  @ApiProperty({ example: 'Maximum Captain Boost' })
+  label: string;
+
+  @ApiProperty()
+  gameweekId: number;
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  usedAt: Date;
+}
+
+export class TeamActivityResponseDto {
+  @ApiProperty({ description: 'Number of (non-initial) transfers the user has made.' })
+  transfersMade: number;
+
+  @ApiProperty({ type: TeamActivityBoostDto, isArray: true })
+  boostsUsed: TeamActivityBoostDto[];
+
+  @ApiProperty({ description: 'Total number of boosts the user has used.' })
+  boostsUsedCount: number;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Timestamp of the most recent team-changing action (transfer, boost, lineup/role change). Null when the team has had no activity.',
+  })
+  lastUpdatedAt: Date | null;
+}
+
 export class GetGameweeksResponseDto {
   @ApiProperty({ type: FantasyGameweek, isArray: true })
   gameweeks: FantasyGameweek[];

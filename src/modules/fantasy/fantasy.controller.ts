@@ -39,6 +39,7 @@ import {
   UpcomingFixtureDto,
   FixturePerformanceItemDto,
   TeamHistoryResponseDto,
+  TeamActivityResponseDto,
 } from './dto/fantasy-response.dto';
 import { FantasyService } from './fantasy.service';
 import { FantasyScoringService } from './fantasy-scoring.service';
@@ -314,6 +315,20 @@ export class FantasyController {
   })
   async getHistory(@Req() req: Request) {
     return this.fantasyService.getHistory(req.user as User);
+  }
+
+  @Get('team/activity')
+  @ApiOperation({
+    summary: 'Get my team activity summary',
+    description:
+      'Returns the "Your Activity" panel data for the authenticated user: number of transfers made, the boosts used (with display labels), and the timestamp of the most recent team-changing action (last update).',
+  })
+  @ApiOkResponse({
+    description: 'Team activity summary',
+    type: TeamActivityResponseDto,
+  })
+  async getActivity(@Req() req: Request) {
+    return this.fantasyService.getActivity(req.user as User);
   }
 
   @Get('leaderboard/archive')

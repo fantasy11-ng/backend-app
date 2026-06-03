@@ -18,6 +18,13 @@ export enum FantasyBoostType {
   SAVES_BOOST = 'SAVES_BOOST',
 }
 
+/** Human-readable labels for boost types (used by the "Your Activity" panel). */
+export const FANTASY_BOOST_LABELS: Record<FantasyBoostType, string> = {
+  [FantasyBoostType.MAX_CAPTAIN]: 'Maximum Captain Boost',
+  [FantasyBoostType.TRIPLE_CAPTAIN]: 'Triple Captain Boost',
+  [FantasyBoostType.SAVES_BOOST]: 'Saves Boost',
+};
+
 export enum FantasyGameweekPhase {
   GROUP = 'GROUP',
   KNOCKOUT = 'KNOCKOUT',

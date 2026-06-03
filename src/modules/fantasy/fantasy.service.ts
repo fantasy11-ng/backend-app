@@ -22,6 +22,7 @@ import { FantasyConfig } from '@/common/config/fantasy.config';
 import { FantasyTimeService } from './fantasy-time.service';
 import { mapPlayerToPositionCode, parseFormation } from './fantasy.utils';
 import {
+  FANTASY_BOOST_LABELS,
   FantasyBoostType,
   FantasyEventType,
   FantasyGameweekPhase,
@@ -1550,6 +1551,57 @@ export class FantasyService {
       order: { createdAt: 'DESC' },
     });
     return { events };
+  }
+
+  /**
+   * Backs the "Your Activity" panel: how many transfers the user has made,
+   * which boosts they have used (with display labels), and when their team was
+   * last updated (most recent transfer / boost / lineup or role change).
+   */
+  async getActivity(user: User) {
+    const { team } = await this.getMyTeam(user);
+
+    const [transfers, boosts, lastEvent] = await Promise.all([
+      // Only count real (NORMAL) transfers; the INITIAL squad is not a transfer.
+      this.transferRepo.find({
+        where: { teamId: team.id, type: TransferType.NORMAL },
+        order: { createdAt: 'DESC' },
+        select: ['id', 'createdAt'],
+      }),
+      this.boostRepo.find({
+        where: { teamId: team.id },
+        order: { createdAt: 'DESC' },
+      }),
+      this.eventRepo.findOne({
+        where: { teamId: team.id },
+        order: { createdAt: 'DESC' },
+        select: ['id', 'createdAt'],
+      }),
+    ]);
+
+    const boostsUsed = boosts.map((b) => ({
+      type: b.type,
+      label: FANTASY_BOOST_LABELS[b.type] ?? b.type,
+      gameweekId: b.gameweekId,
+      usedAt: b.createdAt,
+    }));
+
+    // "Last update" = the most recent of any team-changing action.
+    const candidateDates = [
+      transfers[0]?.createdAt,
+      boosts[0]?.createdAt,
+      lastEvent?.createdAt,
+    ].filter((d): d is Date => !!d);
+    const lastUpdatedAt = candidateDates.length
+      ? new Date(Math.max(...candidateDates.map((d) => new Date(d).getTime())))
+      : null;
+
+    return {
+      transfersMade: transfers.length,
+      boostsUsed,
+      boostsUsedCount: boostsUsed.length,
+      lastUpdatedAt,
+    };
   }
 
   async getLeaderboard(fixtureId: number, user: User, page = 1, limit = 50) {

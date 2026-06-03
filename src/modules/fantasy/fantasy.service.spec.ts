@@ -90,6 +90,7 @@ describe('FantasyService', () => {
             create: jest.fn(),
             save: jest.fn(),
             find: jest.fn(),
+            findOne: jest.fn(),
           },
         },
         {
@@ -639,6 +640,58 @@ describe('FantasyService', () => {
       await expect(
         service.createSquad(user, buildSquadDto()),
       ).rejects.not.toThrow(/maximum of 3 players from the same team/i);
+    });
+  });
+
+  describe('getActivity', () => {
+    it('returns transfers made, boosts used (with labels), and last update', async () => {
+      const user = { id: 'u1' } as any;
+      const team = { id: 't1', budgetRemaining: 0 } as any;
+      jest.spyOn(service, 'getMyTeam').mockResolvedValue({ team } as any);
+
+      const transferDate = new Date('2026-01-03T10:00:00.000Z');
+      const boostDate = new Date('2026-01-04T10:00:00.000Z');
+      const eventDate = new Date('2026-01-02T10:00:00.000Z');
+
+      (transferRepo.find as any).mockResolvedValueOnce([
+        { id: 'tr1', createdAt: transferDate },
+        { id: 'tr2', createdAt: new Date('2026-01-01T10:00:00.000Z') },
+      ]);
+      (boostRepo.find as any).mockResolvedValueOnce([
+        { type: 'MAX_CAPTAIN', gameweekId: 5, createdAt: boostDate },
+      ]);
+      (eventRepo.findOne as any).mockResolvedValueOnce({
+        id: 'ev1',
+        createdAt: eventDate,
+      });
+
+      const res = await service.getActivity(user);
+
+      expect(res.transfersMade).toBe(2);
+      expect(res.boostsUsedCount).toBe(1);
+      expect(res.boostsUsed[0]).toMatchObject({
+        type: 'MAX_CAPTAIN',
+        label: 'Maximum Captain Boost',
+        gameweekId: 5,
+      });
+      // Last update is the most recent of transfer/boost/event (the boost here).
+      expect(res.lastUpdatedAt?.toISOString()).toBe(boostDate.toISOString());
+    });
+
+    it('returns zeros and null last update when there is no activity', async () => {
+      const user = { id: 'u1' } as any;
+      const team = { id: 't1', budgetRemaining: 0 } as any;
+      jest.spyOn(service, 'getMyTeam').mockResolvedValue({ team } as any);
+
+      (transferRepo.find as any).mockResolvedValueOnce([]);
+      (boostRepo.find as any).mockResolvedValueOnce([]);
+      (eventRepo.findOne as any).mockResolvedValueOnce(null);
+
+      const res = await service.getActivity(user);
+
+      expect(res.transfersMade).toBe(0);
+      expect(res.boostsUsedCount).toBe(0);
+      expect(res.lastUpdatedAt).toBeNull();
     });
   });
 
