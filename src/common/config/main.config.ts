@@ -31,6 +31,7 @@ export const mainConfig = () => {
       url: process.env.DATABASE_URL,
     },
     email: {
+      from: process.env.EMAIL_FROM || 'Fantasy 11 <info@fantasy11.ng>',
       resend: {
         apiKey: process.env.RESEND_API_KEY as string,
       },
