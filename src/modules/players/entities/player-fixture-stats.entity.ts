@@ -48,6 +48,9 @@ export class PlayerFixtureStats {
   @Column({ type: 'int', default: 0 })
   fantasyPoints: number;
 
+  @Column({ default: false })
+  cleanSheet: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

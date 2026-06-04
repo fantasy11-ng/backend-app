@@ -355,4 +355,54 @@ describe('player insights mapper', () => {
     expect(dto.season.shotsOnTarget).toBe(21);
     expect(dto.season.keyPasses).toBe(17);
   });
+
+  it('surfaces persisted clean sheets and defaults to zero', () => {
+    expect(
+      toPlayerDetailDto({ player: buildPlayer({ cleanSheets: 6 }) }).season
+        .cleanSheets,
+    ).toBe(6);
+    expect(
+      toPlayerDetailDto({ player: buildPlayer() }).season.cleanSheets,
+    ).toBe(0);
+  });
+
+  it('prefers explicit season clean sheets over the persisted value', () => {
+    const dto = toPlayerCompareItemDto({
+      player: buildPlayer({ cleanSheets: 6 }),
+      seasonStats: { cleanSheets: 9 },
+    });
+
+    expect(dto.season.cleanSheets).toBe(9);
+  });
+
+  it('exposes ownership selectedTeams and current gameweek points on the detail payload', () => {
+    const dto = toPlayerDetailDto({
+      player: buildPlayer(),
+      seasonStats: { currentGameweekPoints: 14 },
+      insights: { selectedTeams: 37 },
+      computedMetrics: {
+        ownership: { selectedTeams: 37, totalTeams: 100 },
+      },
+      gameweekPoints: [
+        { gameweekId: 1, gameweekCode: 'GW1', points: 8 },
+        { gameweekId: 2, gameweekCode: 'GW2', points: 14 },
+      ],
+    });
+
+    expect(dto.insights.selectedTeams).toBe(37);
+    expect(dto.insights.ownership).toBe(37);
+    expect(dto.season.currentGameweekPoints).toBe(14);
+    expect(dto.gameweekPoints).toEqual([
+      { gameweekId: 1, gameweekCode: 'GW1', points: 8 },
+      { gameweekId: 2, gameweekCode: 'GW2', points: 14 },
+    ]);
+  });
+
+  it('defaults gameweek points to an empty list and nullable current gameweek points', () => {
+    const dto = toPlayerDetailDto({ player: buildPlayer() });
+
+    expect(dto.gameweekPoints).toEqual([]);
+    expect(dto.season.currentGameweekPoints).toBeNull();
+    expect(dto.insights.selectedTeams).toBeNull();
+  });
 });

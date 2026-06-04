@@ -66,6 +66,11 @@ export class PlayerSeasonStatsDto {
   redCards: number;
 
   @ApiProperty({
+    description: 'Season clean sheets (counted for GK/DEF only).',
+  })
+  cleanSheets: number;
+
+  @ApiProperty({
     nullable: true,
     description:
       'Full-season minutes played when explicitly available from stored season stats.',
@@ -93,11 +98,27 @@ export class PlayerSeasonStatsDto {
 
   @ApiProperty({ nullable: true })
   keyPasses: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Fantasy points the player accumulated in the most recent gameweek with played fixtures.',
+  })
+  currentGameweekPoints: number | null;
 }
 
 export class PlayerInsightMetricsDto {
-  @ApiProperty({ nullable: true })
+  @ApiProperty({
+    nullable: true,
+    description: 'Percentage of current fantasy squads that selected this player.',
+  })
   ownership: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Raw count of current fantasy squads that selected this player.',
+  })
+  selectedTeams: number | null;
 
   @ApiProperty({ nullable: true })
   priceChange: number | null;
@@ -132,6 +153,17 @@ export class PlayerRecentFixtureStatsDto {
   fantasyPoints: number;
 }
 
+export class PlayerGameweekPointsDto {
+  @ApiProperty()
+  gameweekId: number;
+
+  @ApiProperty({ nullable: true })
+  gameweekCode: string | null;
+
+  @ApiProperty()
+  points: number;
+}
+
 export class PlayerDetailDto {
   @ApiProperty({ type: PlayerSummaryDto })
   player: PlayerSummaryDto;
@@ -149,6 +181,14 @@ export class PlayerDetailDto {
       'Recent per-fixture stat snapshots only. These rows are not season aggregates.',
   })
   recentFixtures: PlayerRecentFixtureStatsDto[];
+
+  @ApiProperty({
+    type: PlayerGameweekPointsDto,
+    isArray: true,
+    description:
+      'Fantasy points per gameweek (only gameweeks with played fixtures), ordered chronologically.',
+  })
+  gameweekPoints: PlayerGameweekPointsDto[];
 }
 
 export class PlayerCompareItemDto {

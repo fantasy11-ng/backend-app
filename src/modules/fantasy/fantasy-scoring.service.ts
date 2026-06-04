@@ -735,6 +735,7 @@ export class FantasyScoringService {
         yellowCards: s.yellowCards || 0,
         redCards: s.redCards || 0,
         fantasyPoints: basePoints + bonusPoints,
+        cleanSheet: s.cleanSheet ?? false,
       });
     });
 
@@ -750,6 +751,10 @@ export class FantasyScoringService {
       .addSelect('COALESCE(SUM(pfs.yellowCards), 0)', 'yellowCards')
       .addSelect('COALESCE(SUM(pfs.redCards), 0)', 'redCards')
       .addSelect('COALESCE(SUM(pfs.fantasyPoints), 0)', 'points')
+      .addSelect(
+        'COALESCE(SUM(CASE WHEN pfs."cleanSheet" THEN 1 ELSE 0 END), 0)',
+        'cleanSheets',
+      )
       .where('pfs.playerId IN (:...playerIds)', { playerIds })
       .groupBy('pfs.playerId')
       .getRawMany<{
@@ -759,6 +764,7 @@ export class FantasyScoringService {
         yellowCards: string;
         redCards: string;
         points: string;
+        cleanSheets: string;
       }>();
 
     for (const row of agg) {
@@ -768,6 +774,7 @@ export class FantasyScoringService {
         yellowCards: Number(row.yellowCards) || 0,
         redCards: Number(row.redCards) || 0,
         points: Number(row.points) || 0,
+        cleanSheets: Number(row.cleanSheets) || 0,
       });
     }
   }

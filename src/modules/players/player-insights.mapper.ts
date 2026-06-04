@@ -2,6 +2,7 @@ import {
   MultiPlayerCompareDto,
   PlayerCompareItemDto,
   PlayerDetailDto,
+  PlayerGameweekPointsDto,
   PlayerInsightMetricsDto,
   PlayerRecentFixtureStatsDto,
   PlayerSeasonStatsDto,
@@ -20,6 +21,7 @@ export type PlayerSeasonStatsInput = Partial<{
   assists: number;
   yellowCards: number;
   redCards: number;
+  cleanSheets: number;
   minutesPlayed: number | null;
   appearances: number | null;
   lineups: number | null;
@@ -27,10 +29,12 @@ export type PlayerSeasonStatsInput = Partial<{
   bench: number | null;
   shotsOnTarget: number | null;
   keyPasses: number | null;
+  currentGameweekPoints: number | null;
 }>;
 
 export type PlayerInsightMetricsInput = Partial<{
   ownership: number | null;
+  selectedTeams: number | null;
   priceChange: number | null;
   form: number | null;
   performanceIndex: number | null;
@@ -42,6 +46,7 @@ export type PlayerInsightsMapperInput = {
   seasonStats?: PlayerSeasonStatsInput;
   insights?: PlayerInsightMetricsInput;
   computedMetrics?: PlayerComputedMetricsInput;
+  gameweekPoints?: PlayerGameweekPointsDto[];
 };
 
 const toRecentFixtureStatsDto = (
@@ -85,6 +90,7 @@ export const toPlayerSeasonStatsDto = (
   assists: seasonStats.assists ?? player.assists ?? 0,
   yellowCards: seasonStats.yellowCards ?? player.yellowCards ?? 0,
   redCards: seasonStats.redCards ?? player.redCards ?? 0,
+  cleanSheets: seasonStats.cleanSheets ?? player.cleanSheets ?? 0,
   minutesPlayed: seasonStats.minutesPlayed ?? player.minutesPlayed ?? null,
   appearances: seasonStats.appearances ?? player.appearances ?? null,
   lineups: seasonStats.lineups ?? player.lineups ?? null,
@@ -92,6 +98,7 @@ export const toPlayerSeasonStatsDto = (
   bench: seasonStats.bench ?? player.bench ?? null,
   shotsOnTarget: seasonStats.shotsOnTarget ?? player.shotsOnTarget ?? null,
   keyPasses: seasonStats.keyPasses ?? player.keyPasses ?? null,
+  currentGameweekPoints: seasonStats.currentGameweekPoints ?? null,
 });
 
 const hasOwnMetricValue = (
@@ -164,6 +171,11 @@ export const toPlayerInsightMetricsDto = (
 
   return {
     ownership: resolveInsightMetric(insights, derivedInsights, 'ownership'),
+    selectedTeams: resolveInsightMetric(
+      insights,
+      derivedInsights,
+      'selectedTeams',
+    ),
     priceChange: resolveInsightMetric(insights, derivedInsights, 'priceChange'),
     form: resolveInsightMetric(insights, derivedInsights, 'form'),
     performanceIndex: resolveInsightMetric(
@@ -180,6 +192,7 @@ export const toPlayerDetailDto = ({
   seasonStats = {},
   insights = {},
   computedMetrics,
+  gameweekPoints = [],
 }: PlayerInsightsMapperInput): PlayerDetailDto => ({
   player: toPlayerSummaryDto(player),
   season: toPlayerSeasonStatsDto(player, seasonStats),
@@ -193,6 +206,7 @@ export const toPlayerDetailDto = ({
     ),
   ),
   recentFixtures: toRecentFixtureStatsDto(recentFixtureStats),
+  gameweekPoints,
 });
 
 export const toPlayerCompareItemDto = ({

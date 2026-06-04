@@ -25,6 +25,7 @@ import { PlayerFixtureStats } from './entities/player-fixture-stats.entity';
 import {
   MultiPlayerCompareDto,
   PlayerDetailDto,
+  PlayerGameweekPointsDto,
 } from './dto/player-insights.dto';
 import {
   toMultiPlayerCompareDto,
@@ -395,6 +396,80 @@ export class PlayersService {
       .getMany();
   }
 
+  /**
+   * Fantasy points per gameweek for a player (only gameweeks with played
+   * fixtures), ordered chronologically by the gameweek's first kickoff.
+   */
+  private async getGameweekPoints(
+    playerId: number,
+  ): Promise<PlayerGameweekPointsDto[]> {
+    const rows = await this.db.query<
+      { gameweekId: number; gameweekCode: string | null; points: string }[]
+    >(
+      `
+      SELECT gw."id" AS "gameweekId",
+             gw."code" AS "gameweekCode",
+             COALESCE(SUM(pfs."fantasyPoints"), 0) AS "points"
+      FROM player_fixture_stats pfs
+      INNER JOIN fixture f ON f.id = pfs."fixtureId"
+      INNER JOIN fantasy_gameweek gw ON gw.id = f."gameweekId"
+      WHERE pfs."playerId" = $1
+        AND f."startingAt" <= NOW()
+      GROUP BY gw."id", gw."code", gw."firstKickoffAt"
+      ORDER BY gw."firstKickoffAt" ASC
+      `,
+      [playerId],
+    );
+
+    return rows.map((row) => ({
+      gameweekId: Number(row.gameweekId),
+      gameweekCode: row.gameweekCode ?? null,
+      points: Number(row.points) || 0,
+    }));
+  }
+
+  /**
+   * Ownership across current fantasy squads.
+   * `selectedTeams` = number of current squads containing the player.
+   * `totalTeams` = total number of current squads.
+   */
+  private async getOwnershipCounts(playerIds: number[]): Promise<{
+    totalTeams: number;
+    selectedTeamsByPlayerId: Map<number, number>;
+  }> {
+    const totalRow = await this.db.query<{ totalTeams: string }[]>(
+      `SELECT COUNT(*)::int AS "totalTeams" FROM fantasy_squad WHERE "isCurrent" = true`,
+    );
+    const totalTeams = Number(totalRow[0]?.totalTeams) || 0;
+
+    const selectedTeamsByPlayerId = new Map<number, number>();
+    if (playerIds.length && totalTeams > 0) {
+      const selectedRows = await this.db.query<
+        { playerId: number; selectedTeams: string }[]
+      >(
+        `
+        SELECT sp."playerId" AS "playerId",
+               COUNT(DISTINCT s."id")::int AS "selectedTeams"
+        FROM fantasy_squad_player sp
+        INNER JOIN fantasy_squad s ON s.id = sp."squadId"
+        WHERE s."isCurrent" = true
+          AND sp."playerId" = ANY($1::int[])
+        GROUP BY sp."playerId"
+        `,
+        [playerIds],
+      );
+
+      for (const row of selectedRows) {
+        selectedTeamsByPlayerId.set(
+          Number(row.playerId),
+          Number(row.selectedTeams) || 0,
+        );
+      }
+    }
+
+    return { totalTeams, selectedTeamsByPlayerId };
+  }
+
   async getPlayerDetail(playerId: number): Promise<PlayerDetailDto> {
     const player = await this.db.getRepository(Player).findOne({
       where: { id: playerId },
@@ -404,11 +479,27 @@ export class PlayersService {
       throw new NotFoundException('Player not found');
     }
 
-    const recentFixtureStats = await this.getRecentFixtureStats(playerId);
+    const [recentFixtureStats, gameweekPoints, ownership] = await Promise.all([
+      this.getRecentFixtureStats(playerId),
+      this.getGameweekPoints(playerId),
+      this.getOwnershipCounts([playerId]),
+    ]);
+
+    const selectedTeams = ownership.selectedTeamsByPlayerId.get(playerId) ?? 0;
+    const currentGameweekPoints =
+      gameweekPoints.length > 0
+        ? gameweekPoints[gameweekPoints.length - 1].points
+        : null;
 
     return toPlayerDetailDto({
       player,
       recentFixtureStats,
+      seasonStats: { currentGameweekPoints },
+      insights: { selectedTeams },
+      computedMetrics: {
+        ownership: { selectedTeams, totalTeams: ownership.totalTeams },
+      },
+      gameweekPoints,
     });
   }
 
@@ -432,10 +523,23 @@ export class PlayersService {
       .map((id) => playerById.get(id))
       .filter((player): player is Player => Boolean(player));
 
+    const ownership = await this.getOwnershipCounts(
+      orderedPlayers.map((player) => player.id),
+    );
+
     return toMultiPlayerCompareDto(
-      orderedPlayers.map((player) => ({
-        player,
-      })),
+      orderedPlayers.map((player) => {
+        const selectedTeams =
+          ownership.selectedTeamsByPlayerId.get(player.id) ?? 0;
+
+        return {
+          player,
+          insights: { selectedTeams },
+          computedMetrics: {
+            ownership: { selectedTeams, totalTeams: ownership.totalTeams },
+          },
+        };
+      }),
     );
   }
 
