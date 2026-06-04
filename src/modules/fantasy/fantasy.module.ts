@@ -88,6 +88,51 @@ CREATE INDEX IF NOT EXISTS "IDX_fantasy_squad_gameweekId"
       `);
 
       /**
+       * Player fixture stats: persist per-fixture clean sheet flag so it can be
+       * aggregated into the player's season clean-sheet total.
+       */
+      await this.dataSource.query(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'player_fixture_stats'
+  ) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'player_fixture_stats' AND column_name = 'cleanSheet'
+    ) THEN
+      ALTER TABLE "player_fixture_stats" ADD COLUMN "cleanSheet" boolean NOT NULL DEFAULT false;
+    END IF;
+  END IF;
+END $$;
+      `);
+
+      /**
+       * Player: persist season clean-sheet total aggregated from fixture stats.
+       */
+      await this.dataSource.query(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'player'
+  ) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'player' AND column_name = 'cleanSheets'
+    ) THEN
+      ALTER TABLE "player" ADD COLUMN "cleanSheets" integer NOT NULL DEFAULT 0;
+    END IF;
+  END IF;
+END $$;
+      `);
+
+      /**
        * Boosts: allow multiple boosts per gameweek (one per type).
        *
        * Older deployments may still have a unique index on ("teamId", "gameweekId"),
@@ -218,16 +263,37 @@ END $$;
 
       /**
        * Competition leaderboard archive: stores top 10 per tournament for history.
+       * `id` must have a DB-side default because TypeORM emits `VALUES (DEFAULT, ...)`
+       * for @PrimaryGeneratedColumn('uuid') when synchronize is off.
        */
+      await this.dataSource.query(
+        `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`,
+      );
       await this.dataSource.query(`
 CREATE TABLE IF NOT EXISTS "competition_leaderboard_archive" (
-  "id" uuid NOT NULL,
+  "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
   "competitionName" character varying NOT NULL,
   "externalSeasonId" integer NOT NULL,
   "archivedAt" TIMESTAMP NOT NULL DEFAULT now(),
   "topEntries" jsonb NOT NULL,
   CONSTRAINT "PK_competition_leaderboard_archive" PRIMARY KEY ("id")
 );
+      `);
+      // Backfill default for tables created before this fix
+      await this.dataSource.query(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'competition_leaderboard_archive'
+      AND column_name = 'id'
+      AND column_default IS NULL
+  ) THEN
+    ALTER TABLE "competition_leaderboard_archive"
+      ALTER COLUMN "id" SET DEFAULT uuid_generate_v4();
+  END IF;
+END $$;
       `);
     } catch (e) {
       this.logger.warn(

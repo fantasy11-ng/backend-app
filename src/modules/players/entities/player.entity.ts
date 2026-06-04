@@ -18,6 +18,8 @@ export class Player {
   name: string;
   @Column()
   commonName: string;
+  @Column({ nullable: true })
+  gameName?: string;
   @Column()
   image: string;
 
@@ -57,6 +59,9 @@ export class Player {
 
   @Column({ default: 0 })
   points: number;
+
+  @Column({ type: 'int', default: 0 })
+  cleanSheets: number;
 
   @Column({ type: 'int', nullable: true })
   minutesPlayed?: number | null;

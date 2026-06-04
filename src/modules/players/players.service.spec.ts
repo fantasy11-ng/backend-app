@@ -21,6 +21,7 @@ describe('PlayersService', () => {
   let createQueryBuilderOrderBy: jest.Mock;
   let createQueryBuilderTake: jest.Mock;
   let createQueryBuilderGetManyRecent: jest.Mock;
+  let dataSourceQuery: jest.Mock;
   let sportmonksPlayersService: {
     getCountries: jest.Mock;
     getPlayers: jest.Mock;
@@ -54,6 +55,12 @@ describe('PlayersService', () => {
     createQueryBuilderInnerJoin = jest.fn(() => ({
       where: createQueryBuilderWhere,
     }));
+    dataSourceQuery = jest.fn(async (sql: string) => {
+      if (/COUNT\(\*\)::int AS "totalTeams"/.test(sql)) {
+        return [{ totalTeams: 0 }];
+      }
+      return [];
+    });
     sportmonksPlayersService = {
       getCountries: jest.fn(async () => []),
       getPlayers: jest.fn(async () => ({
@@ -100,6 +107,7 @@ describe('PlayersService', () => {
         {
           provide: DataSource,
           useValue: {
+            query: dataSourceQuery,
             getRepository: jest.fn((entity) => {
               if (entity === Player) {
                 return {
@@ -428,6 +436,60 @@ describe('PlayersService', () => {
     expect(createQueryBuilderWhere).toHaveBeenCalledWith('stats.playerId = :playerId', {
       playerId: 7,
     });
+  });
+
+  it('includes gameweek points and ownership in player detail', async () => {
+    findOne.mockResolvedValueOnce({
+      id: 7,
+      name: 'Victor Osimhen',
+      commonName: 'Osimhen',
+      image: 'https://cdn.example.com/osimhen.png',
+      pool: 'STAR',
+      positionId: 3,
+      position: {
+        id: 3,
+        name: 'Forward',
+        code: 'FWD',
+        developer_name: 'forward',
+      },
+      countryId: 160,
+      externalId: 1007,
+      rating: 88,
+      goals: 12,
+      assists: 4,
+      yellowCards: 2,
+      redCards: 1,
+      points: 86,
+      cleanSheets: 5,
+      price: 9600000,
+    });
+    createQueryBuilderGetManyRecent.mockResolvedValueOnce([]);
+    dataSourceQuery.mockImplementation(async (sql: string) => {
+      if (/fantasy_gameweek gw/.test(sql)) {
+        return [
+          { gameweekId: 1, gameweekCode: 'GW1', points: '8' },
+          { gameweekId: 2, gameweekCode: 'GW2', points: '14' },
+        ];
+      }
+      if (/COUNT\(\*\)::int AS "totalTeams"/.test(sql)) {
+        return [{ totalTeams: 100 }];
+      }
+      if (/COUNT\(DISTINCT s\."id"\)/.test(sql)) {
+        return [{ playerId: 7, selectedTeams: 37 }];
+      }
+      return [];
+    });
+
+    const detail = await service.getPlayerDetail(7);
+
+    expect(detail.season.cleanSheets).toBe(5);
+    expect(detail.season.currentGameweekPoints).toBe(14);
+    expect(detail.gameweekPoints).toEqual([
+      { gameweekId: 1, gameweekCode: 'GW1', points: 8 },
+      { gameweekId: 2, gameweekCode: 'GW2', points: 14 },
+    ]);
+    expect(detail.insights.selectedTeams).toBe(37);
+    expect(detail.insights.ownership).toBe(37);
   });
 
   it('builds compare payloads in requested id order', async () => {
