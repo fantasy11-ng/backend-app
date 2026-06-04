@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import { In, LessThan, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
 import { FantasyTeam } from './entities/fantasy-team.entity';
 import { FantasySquad } from './entities/fantasy-squad.entity';
 import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
@@ -19,8 +19,10 @@ import { PlayersService } from '@/modules/players/players.service';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
 import { FantasyConfig } from '@/common/config/fantasy.config';
+import { FantasyTimeService } from './fantasy-time.service';
 import { mapPlayerToPositionCode, parseFormation } from './fantasy.utils';
 import {
+  FANTASY_BOOST_LABELS,
   FantasyBoostType,
   FantasyEventType,
   FantasyGameweekPhase,
@@ -39,6 +41,14 @@ import { FantasyGameweek } from './entities/fantasy-gameweek.entity';
 import { FantasyBoost } from './entities/fantasy-boost.entity';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { FootballTeam } from '@/modules/team/entities/football-team.entity';
+import { PlayerFixtureStats } from '@/modules/players/entities/player-fixture-stats.entity';
+import {
+  GlobalInsightsResponseDto,
+  InsightMetricUnit,
+  InsightWidgetCardDto,
+  InsightWidgetItemDto,
+  InsightWidgetPlayerDto,
+} from './dto';
 
 @Injectable()
 export class FantasyService {
@@ -70,8 +80,17 @@ export class FantasyService {
     private readonly fixtureRepo: Repository<Fixture>,
     @InjectRepository(FootballTeam)
     private readonly footballTeamRepo: Repository<FootballTeam>,
+    @InjectRepository(Player)
+    private readonly playerRepo: Repository<Player>,
+    @InjectRepository(PlayerFixtureStats)
+    private readonly playerFixtureStatsRepo: Repository<PlayerFixtureStats>,
+    private readonly fantasyTimeService: FantasyTimeService,
   ) {
     this.fantasyConfig = this.configService.get('fantasy', { infer: true })!;
+  }
+
+  private getNow(): Date {
+    return this.fantasyTimeService.getNow();
   }
 
   private ensureOwnership(team: FantasyTeam, user: User) {
@@ -80,16 +99,286 @@ export class FantasyService {
     }
   }
 
-  private getNow(): Date {
-    const iso = this.fantasyConfig.nowOverrideIso;
-    if (!iso) return new Date();
+  /**
+   * Enforces the "max N players from the same team" rule. In this World Cup
+   * context a player's "team" is their national team, identified by countryId.
+   * Throws BadRequestException listing the offending team(s) when exceeded.
+   */
+  private ensureMaxPlayersPerTeam(players: Player[]) {
+    const max = this.fantasyConfig.maxPlayersPerTeam;
+    if (!max || max <= 0) return;
 
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) {
-      // Fail safe: if misconfigured, behave like normal "now"
-      return new Date();
+    const countByTeam = new Map<number, number>();
+    for (const player of players) {
+      const teamId = player.countryId;
+      if (!teamId) continue;
+      countByTeam.set(teamId, (countByTeam.get(teamId) ?? 0) + 1);
     }
-    return d;
+
+    const offending = [...countByTeam.values()].some((count) => count > max);
+    if (offending) {
+      throw new BadRequestException(
+        `You can select a maximum of ${max} players from the same team`,
+      );
+    }
+  }
+
+  private toInsightWidgetPlayerDto(player: Player): InsightWidgetPlayerDto {
+    return {
+      id: player.id,
+      name: player.name,
+      commonName: player.commonName,
+      image: player.image,
+      pool: player.pool,
+      positionCode: player.position?.code ?? '',
+      points: player.points ?? 0,
+    };
+  }
+
+  private buildInsightCard(params: {
+    title: string;
+    metricUnit: InsightMetricUnit;
+    metricLabel: string;
+    items: InsightWidgetItemDto[];
+    gameweek?: FantasyGameweek | null;
+  }): InsightWidgetCardDto {
+    return {
+      title: params.title,
+      metricUnit: params.metricUnit,
+      metricLabel: params.metricLabel,
+      items: params.items,
+      gameweekId: params.gameweek?.id ?? null,
+      gameweekCode: params.gameweek?.code ?? null,
+    };
+  }
+
+  private sortTopCounts(
+    entries: Array<{ playerId: number; value: number }>,
+    limit: number,
+  ) {
+    return entries
+      .filter((e) => Number.isFinite(e.playerId) && Number.isFinite(e.value))
+      .sort((a, b) =>
+        b.value !== a.value ? b.value - a.value : a.playerId - b.playerId,
+      )
+      .slice(0, limit);
+  }
+
+  private roundPercent(numerator: number, denominator: number): number {
+    if (!denominator) return 0;
+    return Math.round((numerator / denominator) * 100);
+  }
+
+  private async getLatestLockedGameweek(): Promise<FantasyGameweek | null> {
+    const now = this.getNow();
+    const gws = await this.gameweekRepo.find({
+      where: { snapshotDeadlineAt: LessThanOrEqual(now) },
+      order: { snapshotDeadlineAt: 'DESC' },
+      take: 1,
+    });
+    return gws[0] ?? null;
+  }
+
+  private async getPreviousGameweek(
+    gameweek: FantasyGameweek,
+  ): Promise<FantasyGameweek | null> {
+    const gws = await this.gameweekRepo.find({
+      where: { snapshotDeadlineAt: LessThan(gameweek.snapshotDeadlineAt) },
+      order: { snapshotDeadlineAt: 'DESC' },
+      take: 1,
+    });
+    return gws[0] ?? null;
+  }
+
+  private async getLockedSquadIdsForInsights(
+    gameweek: FantasyGameweek | null,
+  ): Promise<string[]> {
+    if (gameweek) {
+      const squads = await this.squadRepo.find({
+        where: {
+          isLocked: true,
+          gameweekId: gameweek.id,
+        },
+        select: ['id'],
+      });
+      if (squads.length) return squads.map((s) => s.id);
+    }
+
+    // Fallback: use the most recent locked squad per team (best-effort).
+    const allLocked = await this.squadRepo.find({
+      where: { isLocked: true },
+      order: { teamId: 'ASC', lockedAt: 'DESC', createdAt: 'DESC' },
+      select: ['id', 'teamId', 'lockedAt', 'createdAt'],
+    });
+
+    const picked: string[] = [];
+    const seenTeams = new Set<string>();
+    for (const s of allLocked) {
+      if (!s.teamId || seenTeams.has(s.teamId)) continue;
+      seenTeams.add(s.teamId);
+      picked.push(s.id);
+    }
+
+    return picked;
+  }
+
+  async getGlobalInsights(): Promise<GlobalInsightsResponseDto> {
+    const latestLockedGw = await this.getLatestLockedGameweek();
+    const prevLockedGw = latestLockedGw
+      ? await this.getPreviousGameweek(latestLockedGw)
+      : null;
+
+    const squadIds = await this.getLockedSquadIdsForInsights(latestLockedGw);
+    const totalSquads = squadIds.length;
+
+    const squadPlayers = totalSquads
+      ? await this.squadPlayerRepo.find({
+          where: { squadId: In(squadIds) },
+          select: ['playerId', 'isCaptain', 'squadId'],
+        })
+      : [];
+
+    const selectedCounts = new Map<number, number>();
+    const captainCounts = new Map<number, number>();
+
+    for (const sp of squadPlayers) {
+      selectedCounts.set(sp.playerId, (selectedCounts.get(sp.playerId) ?? 0) + 1);
+      if (sp.isCaptain) {
+        captainCounts.set(
+          sp.playerId,
+          (captainCounts.get(sp.playerId) ?? 0) + 1,
+        );
+      }
+    }
+
+    const topSelected = this.sortTopCounts(
+      [...selectedCounts.entries()].map(([playerId, value]) => ({
+        playerId,
+        value,
+      })),
+      5,
+    );
+
+    const topCaptained = this.sortTopCounts(
+      [...captainCounts.entries()].map(([playerId, value]) => ({
+        playerId,
+        value,
+      })),
+      5,
+    );
+
+    const transfersStart = prevLockedGw?.snapshotDeadlineAt ?? new Date(0);
+    const transfersEnd = latestLockedGw?.snapshotDeadlineAt ?? this.getNow();
+
+    const transferRaw = await this.transferRepo
+      .createQueryBuilder('t')
+      .select('t.playerInId', 'playerId')
+      .addSelect('COUNT(t.id)', 'value')
+      .where('t.createdAt > :start', { start: transfersStart })
+      .andWhere('t.createdAt <= :end', { end: transfersEnd })
+      .groupBy('t.playerInId')
+      .orderBy('value', 'DESC')
+      .addOrderBy('t.playerInId', 'ASC')
+      .limit(5)
+      .getRawMany<{ playerId: string; value: string }>();
+
+    const topTransferred = transferRaw.map((r) => ({
+      playerId: parseInt(r.playerId, 10),
+      value: parseInt(r.value, 10) || 0,
+    }));
+
+    const performerRaw = latestLockedGw
+      ? await this.playerFixtureStatsRepo
+          .createQueryBuilder('pfs')
+          .innerJoin(Fixture, 'f', 'f.id = pfs.fixtureId')
+          .select('pfs.playerId', 'playerId')
+          .addSelect('SUM(pfs.fantasyPoints)', 'value')
+          .where('f.gameweekId = :gameweekId', { gameweekId: latestLockedGw.id })
+          .groupBy('pfs.playerId')
+          .orderBy('value', 'DESC')
+          .addOrderBy('pfs.playerId', 'ASC')
+          .limit(5)
+          .getRawMany<{ playerId: string; value: string }>()
+      : [];
+
+    const topPerforming = performerRaw.length
+      ? performerRaw.map((r) => ({
+          playerId: parseInt(r.playerId, 10),
+          value: parseInt(r.value, 10) || 0,
+        }))
+      : (
+          await this.playerRepo.find({
+            order: { points: 'DESC', id: 'ASC' },
+            take: 5,
+          })
+        ).map((p) => ({ playerId: p.id, value: p.points ?? 0 }));
+
+    const allPlayerIds = [
+      ...new Set([
+        ...topSelected.map((x) => x.playerId),
+        ...topCaptained.map((x) => x.playerId),
+        ...topTransferred.map((x) => x.playerId),
+        ...topPerforming.map((x) => x.playerId),
+      ]),
+    ].filter((id) => Number.isFinite(id));
+
+    const players = allPlayerIds.length
+      ? await this.playerRepo.findBy({ id: In(allPlayerIds) })
+      : [];
+
+    const playerById = new Map<number, Player>(players.map((p) => [p.id, p]));
+
+    const toItems = (
+      list: Array<{ playerId: number; value: number }>,
+      transform: (value: number) => number,
+    ): InsightWidgetItemDto[] =>
+      list
+        .map(({ playerId, value }) => {
+          const player = playerById.get(playerId);
+          if (!player) return null;
+          return {
+            player: this.toInsightWidgetPlayerDto(player),
+            metricValue: transform(value),
+          };
+        })
+        .filter((x): x is InsightWidgetItemDto => !!x);
+
+    return {
+      mostSelected: this.buildInsightCard({
+        title: 'Most Selected Player',
+        metricUnit: InsightMetricUnit.PERCENT,
+        metricLabel: 'Ownership',
+        items: toItems(topSelected, (count) =>
+          this.roundPercent(count, totalSquads),
+        ),
+        gameweek: latestLockedGw,
+      }),
+      mostCaptained: this.buildInsightCard({
+        title: 'Most Captained',
+        metricUnit: InsightMetricUnit.PERCENT,
+        metricLabel: 'Captained',
+        items: toItems(topCaptained, (count) =>
+          this.roundPercent(count, totalSquads),
+        ),
+        gameweek: latestLockedGw,
+      }),
+      mostTransferred: this.buildInsightCard({
+        title: 'Most Transferred In',
+        metricUnit: InsightMetricUnit.COUNT,
+        metricLabel: 'Transfers',
+        items: toItems(topTransferred, (count) => count),
+        gameweek: latestLockedGw,
+      }),
+      bestPerforming: this.buildInsightCard({
+        title: latestLockedGw
+          ? `Top Performer (Gameweek ${latestLockedGw.code})`
+          : 'Top Performer',
+        metricUnit: InsightMetricUnit.POINTS,
+        metricLabel: 'Points',
+        items: toItems(topPerforming, (points) => points),
+        gameweek: latestLockedGw,
+      }),
+    };
   }
 
   /**
@@ -355,6 +644,8 @@ export class FantasyService {
         'You cannot have duplicate players in your team',
       );
     }
+
+    this.ensureMaxPlayersPerTeam(players);
 
     const totalCost = players.reduce((sum, p) => sum + p.price, 0);
     const initialBudget = this.fantasyConfig.initialBudget;
@@ -1169,6 +1460,8 @@ export class FantasyService {
       keepMap.set(pid, player);
     }
 
+    this.ensureMaxPlayersPerTeam([...keepMap.values()]);
+
     // Rebuild squad players but preserve starting/roles where possible
     const existingByPlayerId = new Map(
       baseSquad.players.map((sp) => [sp.playerId, sp]),
@@ -1258,6 +1551,57 @@ export class FantasyService {
       order: { createdAt: 'DESC' },
     });
     return { events };
+  }
+
+  /**
+   * Backs the "Your Activity" panel: how many transfers the user has made,
+   * which boosts they have used (with display labels), and when their team was
+   * last updated (most recent transfer / boost / lineup or role change).
+   */
+  async getActivity(user: User) {
+    const { team } = await this.getMyTeam(user);
+
+    const [transfers, boosts, lastEvent] = await Promise.all([
+      // Only count real (NORMAL) transfers; the INITIAL squad is not a transfer.
+      this.transferRepo.find({
+        where: { teamId: team.id, type: TransferType.NORMAL },
+        order: { createdAt: 'DESC' },
+        select: ['id', 'createdAt'],
+      }),
+      this.boostRepo.find({
+        where: { teamId: team.id },
+        order: { createdAt: 'DESC' },
+      }),
+      this.eventRepo.findOne({
+        where: { teamId: team.id },
+        order: { createdAt: 'DESC' },
+        select: ['id', 'createdAt'],
+      }),
+    ]);
+
+    const boostsUsed = boosts.map((b) => ({
+      type: b.type,
+      label: FANTASY_BOOST_LABELS[b.type] ?? b.type,
+      gameweekId: b.gameweekId,
+      usedAt: b.createdAt,
+    }));
+
+    // "Last update" = the most recent of any team-changing action.
+    const candidateDates = [
+      transfers[0]?.createdAt,
+      boosts[0]?.createdAt,
+      lastEvent?.createdAt,
+    ].filter((d): d is Date => !!d);
+    const lastUpdatedAt = candidateDates.length
+      ? new Date(Math.max(...candidateDates.map((d) => new Date(d).getTime())))
+      : null;
+
+    return {
+      transfersMade: transfers.length,
+      boostsUsed,
+      boostsUsedCount: boostsUsed.length,
+      lastUpdatedAt,
+    };
   }
 
   async getLeaderboard(fixtureId: number, user: User, page = 1, limit = 50) {

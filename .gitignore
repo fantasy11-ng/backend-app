@@ -38,3 +38,5 @@ lerna-debug.log*
 .env.*
 .team.json
 .fixture-stats.json
+.worktrees/
+.yarn-cache/

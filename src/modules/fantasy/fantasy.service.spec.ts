@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { FantasyService } from './fantasy.service';
+import { FantasyTimeService } from './fantasy-time.service';
 import { FantasyTeam } from './entities/fantasy-team.entity';
 import { FantasySquad } from './entities/fantasy-squad.entity';
 import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
@@ -16,6 +17,8 @@ import { PlayersService } from '@/modules/players/players.service';
 import { SportmonksFixturesService } from '@/common/sportmonks/services/fixtures.service';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { FootballTeam } from '@/modules/team/entities/football-team.entity';
+import { Player } from '@/modules/players/entities/player.entity';
+import { PlayerFixtureStats } from '@/modules/players/entities/player-fixture-stats.entity';
 
 describe('FantasyService', () => {
   let service: FantasyService;
@@ -30,6 +33,8 @@ describe('FantasyService', () => {
   let pointsRepo: Repository<FantasyPoints>;
   let fixtureRepo: Repository<Fixture>;
   let footballTeamRepo: Repository<FootballTeam>;
+  let playerRepo: Repository<Player>;
+  let playerFixtureStatsRepo: Repository<PlayerFixtureStats>;
   let playersService: PlayersService;
   let configService: ConfigService;
 
@@ -67,6 +72,7 @@ describe('FantasyService', () => {
             create: jest.fn(),
             delete: jest.fn(),
             save: jest.fn(),
+            find: jest.fn(),
           },
         },
         {
@@ -75,6 +81,7 @@ describe('FantasyService', () => {
             create: jest.fn(),
             save: jest.fn(),
             find: jest.fn(),
+            createQueryBuilder: jest.fn(),
           },
         },
         {
@@ -83,12 +90,14 @@ describe('FantasyService', () => {
             create: jest.fn(),
             save: jest.fn(),
             find: jest.fn(),
+            findOne: jest.fn(),
           },
         },
         {
           provide: getRepositoryToken(FantasyTeamRanking),
           useValue: {
             find: jest.fn(),
+            findOne: jest.fn(),
             create: jest.fn((x) => x),
           },
         },
@@ -132,9 +141,28 @@ describe('FantasyService', () => {
           },
         },
         {
+          provide: getRepositoryToken(Player),
+          useValue: {
+            findBy: jest.fn(),
+            find: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(PlayerFixtureStats),
+          useValue: {
+            createQueryBuilder: jest.fn(),
+          },
+        },
+        {
           provide: PlayersService,
           useValue: {
             getPlayersFromIds: jest.fn(),
+          },
+        },
+        {
+          provide: FantasyTimeService,
+          useValue: {
+            getNow: () => new Date('2026-01-01T00:00:00.000Z'),
           },
         },
         {
@@ -145,6 +173,7 @@ describe('FantasyService', () => {
               squadSize: 15,
               startingXiSize: 11,
               benchSize: 4,
+              maxPlayersPerTeam: 3,
               snapshotLeadMinutes: 120,
               nowOverrideIso: '2026-01-01T00:00:00.000Z',
               formations: [
@@ -190,6 +219,10 @@ describe('FantasyService', () => {
     fixtureRepo = module.get<Repository<Fixture>>(getRepositoryToken(Fixture));
     footballTeamRepo = module.get<Repository<FootballTeam>>(
       getRepositoryToken(FootballTeam),
+    );
+    playerRepo = module.get<Repository<Player>>(getRepositoryToken(Player));
+    playerFixtureStatsRepo = module.get<Repository<PlayerFixtureStats>>(
+      getRepositoryToken(PlayerFixtureStats),
     );
     playersService = module.get<PlayersService>(PlayersService);
     configService = module.get<ConfigService>(ConfigService);
@@ -307,6 +340,111 @@ describe('FantasyService', () => {
     });
   });
 
+  describe('getGlobalInsights', () => {
+    const makeQb = <T>(result: T) => {
+      const qb: any = {
+        select: jest.fn(() => qb),
+        addSelect: jest.fn(() => qb),
+        where: jest.fn(() => qb),
+        andWhere: jest.fn(() => qb),
+        groupBy: jest.fn(() => qb),
+        orderBy: jest.fn(() => qb),
+        addOrderBy: jest.fn(() => qb),
+        limit: jest.fn(() => qb),
+        innerJoin: jest.fn(() => qb),
+        getRawMany: jest.fn(async () => result),
+      };
+      return qb;
+    };
+
+    it('computes most selected/captained, transfers, and top performer for the latest locked gameweek', async () => {
+      const gw4 = {
+        id: 4,
+        code: '4',
+        snapshotDeadlineAt: new Date('2025-12-31T12:00:00.000Z'),
+      } as any;
+      const gw3 = {
+        id: 3,
+        code: '3',
+        snapshotDeadlineAt: new Date('2025-12-24T12:00:00.000Z'),
+      } as any;
+
+      (gameweekRepo.find as any)
+        .mockResolvedValueOnce([gw4]) // latest locked
+        .mockResolvedValueOnce([gw3]); // previous
+
+      (squadRepo.find as any).mockResolvedValueOnce([
+        { id: 's1' },
+        { id: 's2' },
+      ]);
+
+      (squadPlayerRepo.find as any).mockResolvedValueOnce([
+        { squadId: 's1', playerId: 1, isCaptain: true },
+        { squadId: 's1', playerId: 2, isCaptain: false },
+        { squadId: 's2', playerId: 1, isCaptain: false },
+        { squadId: 's2', playerId: 3, isCaptain: true },
+      ]);
+
+      const transferQb = makeQb([
+        { playerId: '2', value: '5' },
+        { playerId: '1', value: '3' },
+      ]);
+      (transferRepo.createQueryBuilder as any).mockReturnValue(transferQb);
+
+      const performerQb = makeQb([
+        { playerId: '3', value: '18' },
+        { playerId: '1', value: '12' },
+      ]);
+      (playerFixtureStatsRepo.createQueryBuilder as any).mockReturnValue(
+        performerQb,
+      );
+
+      (playerRepo.findBy as any).mockResolvedValue([
+        {
+          id: 1,
+          name: 'Mbappé',
+          commonName: 'Mbappé',
+          image: 'p1.png',
+          pool: 'A',
+          position: { code: 'FWD' },
+          points: 100,
+        },
+        {
+          id: 2,
+          name: 'Kane',
+          commonName: 'Kane',
+          image: 'p2.png',
+          pool: 'A',
+          position: { code: 'FWD' },
+          points: 90,
+        },
+        {
+          id: 3,
+          name: 'De Bruyne',
+          commonName: 'De Bruyne',
+          image: 'p3.png',
+          pool: 'A',
+          position: { code: 'MID' },
+          points: 110,
+        },
+      ]);
+
+      const res = await service.getGlobalInsights();
+
+      expect(res.mostSelected.gameweekId).toBe(4);
+      expect(res.mostSelected.items[0].player.id).toBe(1);
+      expect(res.mostSelected.items[0].metricValue).toBe(100); // 2/2 squads
+
+      expect(res.mostCaptained.items[0].metricValue).toBe(50); // 1/2 squads
+      expect(res.mostTransferred.items[0].player.id).toBe(2);
+      expect(res.mostTransferred.items[0].metricValue).toBe(5);
+
+      expect(res.bestPerforming.gameweekId).toBe(4);
+      expect(res.bestPerforming.items[0].player.id).toBe(3);
+      expect(res.bestPerforming.items[0].metricValue).toBe(18);
+    });
+  });
+
   describe('getUpcomingFixtures', () => {
     it('should return upcoming fixtures only from the current (last locked) gameweek when it still has future fixtures', async () => {
       const nextOpenGw = {
@@ -396,6 +534,164 @@ describe('FantasyService', () => {
       );
       expect(res).toHaveLength(1);
       expect(res[0]).toMatchObject({ id: 20, gameweekId: 2 });
+    });
+  });
+
+  describe('getMyTeam (season ended)', () => {
+    it('should return the last/current squad instead of throwing when there is no upcoming gameweek', async () => {
+      const user = { id: 'u1' } as any;
+
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        ownerId: 'u1',
+        squads: [{ id: 's1' }],
+      });
+
+      // No season row -> zeros
+      (rankingRepo.findOne as any).mockResolvedValueOnce(null);
+
+      // betterCount query for rank
+      const qbBetter: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(0),
+      };
+      (teamRepo.createQueryBuilder as any).mockReturnValueOnce(qbBetter);
+
+      // No upcoming gameweek -> season ended
+      const qbNextGw: any = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      (gameweekRepo.createQueryBuilder as any).mockReturnValueOnce(qbNextGw);
+
+      // lockExpiredDraftSquads: no unlocked drafts to lock
+      (squadRepo.find as any).mockResolvedValueOnce([]);
+
+      // Return "current" squad
+      (squadRepo.findOne as any)
+        .mockResolvedValueOnce({
+          id: 's1',
+          teamId: 't1',
+          isCurrent: true,
+          players: [],
+        })
+        .mockResolvedValueOnce(null);
+
+      const res = await service.getMyTeam(user);
+      expect(res.team.id).toBe('t1');
+      expect(res.currentSquad?.id).toBe('s1');
+    });
+  });
+
+  describe('createSquad - max players per team', () => {
+    const buildSquadDto = () => ({
+      formation: '4-4-2',
+      squad: Array.from({ length: 15 }, (_, i) => ({
+        playerId: i + 1,
+        isStarting: i < 11,
+      })),
+    });
+
+    // countryId acts as the national-team identifier for the max-per-team rule.
+    const buildPlayers = (countryIds: number[]) =>
+      countryIds.map((countryId, i) => ({
+        id: i + 1,
+        countryId,
+        price: 1_000_000,
+        position: { code: i === 0 ? 'GK' : 'DEF' },
+      })) as any[];
+
+    it('rejects a squad with more than 3 players from the same team', async () => {
+      const user = { id: 'u1' } as any;
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        ownerId: 'u1',
+        squads: [],
+      });
+
+      // 4 players share countryId=10 -> should be rejected.
+      const countryIds = [10, 10, 10, 10, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13];
+      (playersService.getPlayersFromIds as any).mockResolvedValueOnce(
+        buildPlayers(countryIds),
+      );
+
+      await expect(service.createSquad(user, buildSquadDto())).rejects.toThrow(
+        /maximum of 3 players from the same team/i,
+      );
+    });
+
+    it('allows a squad with at most 3 players from any single team', async () => {
+      const user = { id: 'u1' } as any;
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        ownerId: 'u1',
+        squads: [],
+      });
+
+      // At most 3 from countryId=10; passes the per-team rule and proceeds to
+      // later validation (budget), which is not the assertion under test.
+      const countryIds = [10, 10, 10, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14];
+      (playersService.getPlayersFromIds as any).mockResolvedValueOnce(
+        buildPlayers(countryIds),
+      );
+
+      await expect(
+        service.createSquad(user, buildSquadDto()),
+      ).rejects.not.toThrow(/maximum of 3 players from the same team/i);
+    });
+  });
+
+  describe('getActivity', () => {
+    it('returns transfers made, boosts used (with labels), and last update', async () => {
+      const user = { id: 'u1' } as any;
+      const team = { id: 't1', budgetRemaining: 0 } as any;
+      jest.spyOn(service, 'getMyTeam').mockResolvedValue({ team } as any);
+
+      const transferDate = new Date('2026-01-03T10:00:00.000Z');
+      const boostDate = new Date('2026-01-04T10:00:00.000Z');
+      const eventDate = new Date('2026-01-02T10:00:00.000Z');
+
+      (transferRepo.find as any).mockResolvedValueOnce([
+        { id: 'tr1', createdAt: transferDate },
+        { id: 'tr2', createdAt: new Date('2026-01-01T10:00:00.000Z') },
+      ]);
+      (boostRepo.find as any).mockResolvedValueOnce([
+        { type: 'MAX_CAPTAIN', gameweekId: 5, createdAt: boostDate },
+      ]);
+      (eventRepo.findOne as any).mockResolvedValueOnce({
+        id: 'ev1',
+        createdAt: eventDate,
+      });
+
+      const res = await service.getActivity(user);
+
+      expect(res.transfersMade).toBe(2);
+      expect(res.boostsUsedCount).toBe(1);
+      expect(res.boostsUsed[0]).toMatchObject({
+        type: 'MAX_CAPTAIN',
+        label: 'Maximum Captain Boost',
+        gameweekId: 5,
+      });
+      // Last update is the most recent of transfer/boost/event (the boost here).
+      expect(res.lastUpdatedAt?.toISOString()).toBe(boostDate.toISOString());
+    });
+
+    it('returns zeros and null last update when there is no activity', async () => {
+      const user = { id: 'u1' } as any;
+      const team = { id: 't1', budgetRemaining: 0 } as any;
+      jest.spyOn(service, 'getMyTeam').mockResolvedValue({ team } as any);
+
+      (transferRepo.find as any).mockResolvedValueOnce([]);
+      (boostRepo.find as any).mockResolvedValueOnce([]);
+      (eventRepo.findOne as any).mockResolvedValueOnce(null);
+
+      const res = await service.getActivity(user);
+
+      expect(res.transfersMade).toBe(0);
+      expect(res.boostsUsedCount).toBe(0);
+      expect(res.lastUpdatedAt).toBeNull();
     });
   });
 

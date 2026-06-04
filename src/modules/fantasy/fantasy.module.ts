@@ -23,9 +23,21 @@ import { SportmonksMatchStatsProvider } from './services/sportmonks-match-stats.
 import { FootballTeam } from '../team/entities/football-team.entity';
 import { FantasyLeague } from './entities/fantasy-league.entity';
 import { FantasyLeagueMembership } from './entities/fantasy-league-membership.entity';
+import { CompetitionLeaderboardArchive } from './entities/competition-leaderboard-archive.entity';
 import { FantasyLeagueService } from './fantasy-league.service';
 import { FantasyLeagueController } from './fantasy-league.controller';
 import { FantasyScoringDailyJob } from './fantasy-scoring.daily-job';
+import { TournamentResetService } from './tournament-reset.service';
+import { FantasyTimeService } from './fantasy-time.service';
+import { Player } from '@/modules/players/entities/player.entity';
+import { PlayerFixtureStats } from '@/modules/players/entities/player-fixture-stats.entity';
+import { FixturePrediction } from '@/modules/predictor/entities/fixture-prediction.entity';
+import { ThirdPlaceMatchPrediction } from '@/modules/predictor/entities/third-place-match-prediction.entity';
+import { ThirdPlaceQualifiersInput } from '@/modules/predictor/entities/third-place-qualifiers-input.entity';
+import { Prediction } from '@/modules/predictor/entities/prediction.entity';
+import { Stage } from '@/modules/stages/entities/stage.entity';
+import { Group } from '@/modules/stages/entities/group.entity';
+import { SettingsModule } from '@/modules/settings/settings.module';
 
 /**
  * Lightweight, idempotent schema guard for Fantasy tables.
@@ -203,6 +215,20 @@ BEGIN
   END IF;
 END $$;
       `);
+
+      /**
+       * Competition leaderboard archive: stores top 10 per tournament for history.
+       */
+      await this.dataSource.query(`
+CREATE TABLE IF NOT EXISTS "competition_leaderboard_archive" (
+  "id" uuid NOT NULL,
+  "competitionName" character varying NOT NULL,
+  "externalSeasonId" integer NOT NULL,
+  "archivedAt" TIMESTAMP NOT NULL DEFAULT now(),
+  "topEntries" jsonb NOT NULL,
+  CONSTRAINT "PK_competition_leaderboard_archive" PRIMARY KEY ("id")
+);
+      `);
     } catch (e) {
       this.logger.warn(
         `Fantasy schema guard skipped/failed: ${(e as Error)?.message ?? e}`,
@@ -228,17 +254,29 @@ END $$;
       FootballTeam,
       FantasyLeague,
       FantasyLeagueMembership,
+      CompetitionLeaderboardArchive,
+      Player,
+      PlayerFixtureStats,
+      FixturePrediction,
+      ThirdPlaceMatchPrediction,
+      ThirdPlaceQualifiersInput,
+      Prediction,
+      Stage,
+      Group,
     ]),
     PlayersModule,
     TeamModule,
     SportmonksModule,
+    SettingsModule,
   ],
   controllers: [FantasyController, FantasyLeagueController],
   providers: [
+    FantasyTimeService,
     FantasyService,
     FantasyScoringService,
     FantasyScoringDailyJob,
     FantasyLeagueService,
+    TournamentResetService,
     FantasySchemaInitService,
     SportmonksMatchStatsProvider,
     {

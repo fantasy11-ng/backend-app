@@ -25,20 +25,27 @@ import {
   updatePasswordDtoSchema,
 } from './dto/update-password.dto';
 import { MessageResponse } from '@/modules/auth/dto/auth.responses';
+import { PredictorService } from '@/modules/predictor/predictor.service';
 import * as bcrypt from 'bcrypt';
 
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly predictorService: PredictorService,
+  ) {}
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current authenticated user' })
   @ApiOkResponse({ type: MeResponse })
-  getMe(@Req() req: Request) {
-    return req.user as User;
+  async getMe(@Req() req: Request) {
+    const user = req.user as User;
+    const predictionStatus =
+      await this.predictorService.getPredictionStatusSafe(user);
+    return { ...user, predictionStatus };
   }
 
   @Patch('me')

@@ -21,4 +21,11 @@ export class CreatePlayerDto {
   countryId: number;
   rating?: number;
   points?: number;
+  minutesPlayed?: number | null;
+  appearances?: number | null;
+  lineups?: number | null;
+  starts?: number | null;
+  bench?: number | null;
+  shotsOnTarget?: number | null;
+  keyPasses?: number | null;
 }

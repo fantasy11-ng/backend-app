@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Post,
@@ -38,9 +39,12 @@ import {
   UpcomingFixtureDto,
   FixturePerformanceItemDto,
   TeamHistoryResponseDto,
+  TeamActivityResponseDto,
 } from './dto/fantasy-response.dto';
 import { FantasyService } from './fantasy.service';
 import { FantasyScoringService } from './fantasy-scoring.service';
+import { TournamentResetService } from './tournament-reset.service';
+import { FantasyTimeService } from './fantasy-time.service';
 import { RolesGuard } from '@/modules/auth/guards/roles.guard';
 import { Roles } from '@/modules/auth/guards/roles.decorator';
 import { UserRole } from '@/modules/users/entities/user.entity';
@@ -53,6 +57,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { FantasyTransfer } from './entities/fantasy-transfer.entity';
+import { GlobalInsightsResponseDto } from './dto';
 
 @ApiTags('Fantasy')
 @Controller('fantasy')
@@ -61,7 +66,23 @@ export class FantasyController {
   constructor(
     private readonly fantasyService: FantasyService,
     private readonly scoringService: FantasyScoringService,
+    private readonly tournamentResetService: TournamentResetService,
+    private readonly fantasyTimeService: FantasyTimeService,
   ) {}
+
+  @Get('insights')
+  @ApiOperation({
+    summary: 'Get global league insights',
+    description:
+      'Returns global top-player widgets such as most selected, most captained, most transferred in, and best performing.',
+  })
+  @ApiOkResponse({
+    description: 'Global insights payload',
+    type: GlobalInsightsResponseDto,
+  })
+  async getGlobalInsights() {
+    return this.fantasyService.getGlobalInsights();
+  }
 
   @Post('team')
   @ApiOperation({
@@ -296,6 +317,50 @@ export class FantasyController {
     return this.fantasyService.getHistory(req.user as User);
   }
 
+  @Get('team/activity')
+  @ApiOperation({
+    summary: 'Get my team activity summary',
+    description:
+      'Returns the "Your Activity" panel data for the authenticated user: number of transfers made, the boosts used (with display labels), and the timestamp of the most recent team-changing action (last update).',
+  })
+  @ApiOkResponse({
+    description: 'Team activity summary',
+    type: TeamActivityResponseDto,
+  })
+  async getActivity(@Req() req: Request) {
+    return this.fantasyService.getActivity(req.user as User);
+  }
+
+  @Get('leaderboard/archive')
+  @ApiOperation({
+    summary: 'Get archived leaderboards',
+    description:
+      'Returns historical top 10 leaderboards from past tournaments (e.g. AFCON, World Cup).',
+  })
+  @ApiOkResponse({
+    description: 'List of archived leaderboards',
+  })
+  async getLeaderboardArchives() {
+    return this.tournamentResetService.getArchives();
+  }
+
+  @Get('leaderboard/archive/:id')
+  @ApiOperation({
+    summary: 'Get archived leaderboard by ID',
+    description: 'Returns a specific archived top 10 leaderboard.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'Archive ID' })
+  @ApiOkResponse({
+    description: 'Archived leaderboard details',
+  })
+  async getLeaderboardArchive(@Param('id') id: string) {
+    const archive = await this.tournamentResetService.getArchiveById(id);
+    if (!archive) {
+      throw new NotFoundException('Archive not found');
+    }
+    return archive;
+  }
+
   @Get('leaderboard/season')
   @ApiOperation({
     summary: 'Get season leaderboard',
@@ -471,5 +536,43 @@ export class FantasyController {
       concurrency: parsed,
     });
     return { message: 'Bulk scoring recomputed', ...result };
+  }
+
+  @Get('time/now')
+  @ApiOperation({
+    summary: 'Get current fantasy time',
+    description:
+      'Returns the "now" used by fantasy logic. When simulated time is enabled (FANTASY_SIM_ANCHOR_ISO + FANTASY_SIM_SPEED), this advances in real time. Useful for debugging.',
+  })
+  @ApiOkResponse({
+    description: 'Current fantasy time and real time',
+    schema: {
+      type: 'object',
+      properties: {
+        fantasyNow: { type: 'string', format: 'date-time' },
+        realNow: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  async getFantasyTime() {
+    return {
+      fantasyNow: this.fantasyTimeService.getNow().toISOString(),
+      realNow: new Date().toISOString(),
+    };
+  }
+
+  @Post('tournament/reset')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Archive top 10 and reset for new tournament',
+    description:
+      'Admin only. Archives the current top 10 global leaderboard, then deletes all competition data (teams, squads, players, fixtures, predictor, etc.). Users are retained. Run stages sync and players sync after this to load the new competition.',
+  })
+  @ApiOkResponse({
+    description: 'Archive and reset completed',
+  })
+  async archiveAndResetTournament() {
+    return this.tournamentResetService.archiveAndReset();
   }
 }

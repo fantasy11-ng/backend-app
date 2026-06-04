@@ -9,9 +9,10 @@ export class UsersService {
     @InjectRepository(User) private readonly usersRepository: Repository<User>,
   ) {}
 
-  async create(user: Omit<User, 'id' | 'isActive'>) {
+  async create(user: Omit<User, 'id' | 'isActive'>): Promise<User> {
     console.log(user);
-    await this.usersRepository.insert(user);
+    const result = await this.usersRepository.insert(user);
+    return this.usersRepository.findOneBy({ id: result.identifiers[0].id });
   }
 
   async update(id: string, user: Partial<User>) {

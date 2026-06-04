@@ -1,12 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { SportmonksPlayersService } from 'src/common/sportmonks/services/players.service';
-import { DataSource } from 'typeorm';
+import { SportmonksPlayersService } from '@/common/sportmonks/services/players.service';
+import { DataSource, IsNull } from 'typeorm';
+import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { Player } from './entities/player.entity';
 import { CreatePlayerDto } from './dto/create-player.dto';
-import { FootballService } from 'src/common/football/services/football.service';
+import { FootballService } from '@/common/football/services/football.service';
 import { SettingsService } from '../settings/settings.service';
-import { SportmonksTeam } from 'src/common/sportmonks/types/teams.type';
+import { SportmonksTeam } from '@/common/sportmonks/types/teams.type';
 import { SportmonksPlayer } from '@/common/sportmonks/types/players.types';
 import {
   FilterOperator,
@@ -16,6 +17,30 @@ import {
   paginate,
 } from 'nestjs-paginate';
 import { DEFAULT_PLAYER_RATING } from '@/common/football/constants/players.constants';
+import {
+  mapSportmonksSeasonStats,
+  PlayerSeasonStatsSnapshot,
+} from './player-season-stats.mapper';
+import { PlayerFixtureStats } from './entities/player-fixture-stats.entity';
+import {
+  MultiPlayerCompareDto,
+  PlayerDetailDto,
+} from './dto/player-insights.dto';
+import {
+  toMultiPlayerCompareDto,
+  toPlayerDetailDto,
+} from './player-insights.mapper';
+
+const SEASON_STAT_TYPE_IDS = [86, 117, 119, 321, 322, 323];
+const pickPositiveId = (...candidates: Array<number | null | undefined>) => {
+  for (const c of candidates) {
+    if (c == null) continue;
+    const n = Number(c);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    return n;
+  }
+  return 0;
+};
 
 export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
   sortableColumns: [
@@ -29,6 +54,10 @@ export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
     'yellowCards',
     'redCards',
     'points',
+    'minutesPlayed',
+    'appearances',
+    'shotsOnTarget',
+    'keyPasses',
   ],
   searchableColumns: ['name', 'commonName'],
   filterableColumns: {
@@ -64,7 +93,10 @@ export class PlayersService {
     // Fallback for legacy rows created before externalId was correct.
     if (!existingPlayer) {
       existingPlayer = await playersRepo.findOne({
-        where: { name: data.name },
+        where: {
+          name: data.name,
+          externalId: IsNull(),
+        },
       });
     }
 
@@ -103,6 +135,7 @@ export class PlayersService {
       developer_name: string;
     } | null;
     fallbackCountryId?: number;
+    seasonStats?: PlayerSeasonStatsSnapshot;
   }) {
     const {
       sportmonksPlayerId,
@@ -110,6 +143,7 @@ export class PlayersService {
       positionId,
       position,
       fallbackCountryId,
+      seasonStats,
     } = params;
 
     const pid = positionId ?? player.position_id;
@@ -124,11 +158,24 @@ export class PlayersService {
       player.position ??
       this.footballService.positionIdToPosition(pid);
 
-    const countryId =
-      (player.nationality_id as any) ??
-      (player.country_id as any) ??
-      (fallbackCountryId as any) ??
-      0;
+    const countryId = pickPositiveId(
+      player.nationality_id as any,
+      player.country_id as any,
+      fallbackCountryId as any,
+    );
+
+    const seasonStatsPatch =
+      seasonStats === undefined
+        ? {}
+        : {
+            minutesPlayed: seasonStats.minutesPlayed ?? null,
+            appearances: seasonStats.appearances ?? null,
+            lineups: seasonStats.lineups ?? null,
+            starts: seasonStats.starts ?? null,
+            bench: seasonStats.bench ?? null,
+            shotsOnTarget: seasonStats.shotsOnTarget ?? null,
+            keyPasses: seasonStats.keyPasses ?? null,
+          };
 
     return this.createOrUpdatePlayer({
       externalId: sportmonksPlayerId,
@@ -145,6 +192,7 @@ export class PlayersService {
         code: pos.code,
       },
       countryId,
+      ...seasonStatsPatch,
     });
   }
 
@@ -236,9 +284,33 @@ export class PlayersService {
               );
             }
 
+            let playerWithSeasonStats = smPlayer;
+            let seasonStats: PlayerSeasonStatsSnapshot | undefined = undefined;
+
+            try {
+              playerWithSeasonStats =
+                await this.sportmonksPlayersService.getPlayerById(
+                  sportmonksPlayerId,
+                  {
+                    include: 'position;statistics.details',
+                    filters: `playerStatisticSeasons:${league.currentSeason.serviceId};playerStatisticDetailTypes:${SEASON_STAT_TYPE_IDS.join(',')}`,
+                  },
+                );
+              seasonStats = mapSportmonksSeasonStats(
+                playerWithSeasonStats,
+                league.currentSeason.serviceId,
+              );
+            } catch (e) {
+              console.warn(
+                `Failed to fetch season stats for player ${sportmonksPlayerId}: ${
+                  (e as Error)?.message ?? e
+                }`,
+              );
+            }
+
             await this.upsertFromSportmonksPlayer({
               sportmonksPlayerId,
-              player: smPlayer,
+              player: playerWithSeasonStats,
               positionId,
               position: {
                 id: pos.id,
@@ -247,6 +319,7 @@ export class PlayersService {
                 code: pos.code,
               },
               fallbackCountryId: countryId,
+              seasonStats,
             });
           } catch (e) {
             console.error(
@@ -267,7 +340,103 @@ export class PlayersService {
 
   async getPlayers(query: PaginateQuery): Promise<Paginated<Player>> {
     const qb = this.db.getRepository(Player).createQueryBuilder('player');
-    return paginate(query, qb, PLAYER_PAGINATION_CONFIG);
+    const result = await paginate(query, qb, PLAYER_PAGINATION_CONFIG);
+
+    if (result.data.length) {
+      const playerIds = result.data.map((p) => p.id);
+      const formRows = await this.db.query<
+        { playerId: number; form: string }[]
+      >(
+        `
+        SELECT t."playerId", ROUND(AVG(t."fantasyPoints")::numeric, 1) AS form
+        FROM (
+          SELECT pfs."playerId",
+                 pfs."fantasyPoints",
+                 ROW_NUMBER() OVER (
+                   PARTITION BY pfs."playerId"
+                   ORDER BY f."startingAt" DESC
+                 ) AS rn
+          FROM player_fixture_stats pfs
+          INNER JOIN fixture f ON f.id = pfs."fixtureId"
+          WHERE pfs."playerId" = ANY($1::int[])
+            AND pfs."minutesPlayed" > 0
+            AND f."startingAt" <= NOW()
+        ) t
+        WHERE t.rn <= 3
+        GROUP BY t."playerId"
+        `,
+        [playerIds],
+      );
+
+      const formByPlayerId = new Map(
+        formRows.map((row) => [Number(row.playerId), Number(row.form)]),
+      );
+
+      for (const player of result.data) {
+        player.form = formByPlayerId.get(player.id) ?? 0;
+      }
+    }
+
+    return result;
+  }
+
+  private async getRecentFixtureStats(
+    playerId: number,
+    limit = 3,
+  ): Promise<PlayerFixtureStats[]> {
+    return await this.db
+      .getRepository(PlayerFixtureStats)
+      .createQueryBuilder('stats')
+      .innerJoin(Fixture, 'fixture', 'fixture.id = stats.fixtureId')
+      .where('stats.playerId = :playerId', { playerId })
+      .andWhere('fixture.startingAt <= NOW()')
+      .orderBy('fixture.startingAt', 'DESC')
+      .take(limit)
+      .getMany();
+  }
+
+  async getPlayerDetail(playerId: number): Promise<PlayerDetailDto> {
+    const player = await this.db.getRepository(Player).findOne({
+      where: { id: playerId },
+    });
+
+    if (!player) {
+      throw new NotFoundException('Player not found');
+    }
+
+    const recentFixtureStats = await this.getRecentFixtureStats(playerId);
+
+    return toPlayerDetailDto({
+      player,
+      recentFixtureStats,
+    });
+  }
+
+  async comparePlayers(playerIds: number[]): Promise<MultiPlayerCompareDto> {
+    const uniquePlayerIds = Array.from(
+      new Set(
+        playerIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    );
+
+    if (!uniquePlayerIds.length) {
+      return { players: [] };
+    }
+
+    const players = await this.getPlayersFromIds(uniquePlayerIds);
+    const playerById = new Map(players.map((player) => [player.id, player]));
+
+    const orderedPlayers = uniquePlayerIds
+      .map((id) => playerById.get(id))
+      .filter((player): player is Player => Boolean(player));
+
+    return toMultiPlayerCompareDto(
+      orderedPlayers.map((player) => ({
+        player,
+      })),
+    );
   }
 
   async getPlayersFromIds(playersIds: number[]) {

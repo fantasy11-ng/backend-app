@@ -5,15 +5,30 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, LessThan, LessThanOrEqual, Repository } from 'typeorm';
 import { FantasyLeague } from './entities/fantasy-league.entity';
 import { FantasyLeagueMembership } from './entities/fantasy-league-membership.entity';
 import { FantasyTeamRanking } from './entities/fantasy-team-ranking.entity';
 import { FantasyService } from './fantasy.service';
 import { User } from '@/modules/users/entities/user.entity';
-import { CreateFantasyLeagueDto } from './dto';
+import {
+  CreateFantasyLeagueDto,
+  InsightMetricUnit,
+  InsightWidgetCardDto,
+  InsightWidgetItemDto,
+  InsightWidgetPlayerDto,
+  LeagueInsightsResponseDto,
+  LeagueInsightsTableRowDto,
+} from './dto';
 import { ConfigService } from '@nestjs/config';
 import { MainConfig } from '@/common/config/main.config';
+import { FantasyGameweek } from './entities/fantasy-gameweek.entity';
+import { FantasyTimeService } from './fantasy-time.service';
+import { FantasySquad } from './entities/fantasy-squad.entity';
+import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
+import { FantasyTransfer } from './entities/fantasy-transfer.entity';
+import { FantasyPoints } from './entities/fantasy-points.entity';
+import { Player } from '@/modules/players/entities/player.entity';
 
 @Injectable()
 export class FantasyLeagueService {
@@ -22,17 +37,180 @@ export class FantasyLeagueService {
   constructor(
     private readonly fantasyService: FantasyService,
     private readonly configService: ConfigService<MainConfig>,
+    private readonly fantasyTimeService: FantasyTimeService,
     @InjectRepository(FantasyLeague)
     private readonly leagueRepo: Repository<FantasyLeague>,
     @InjectRepository(FantasyLeagueMembership)
     private readonly membershipRepo: Repository<FantasyLeagueMembership>,
     @InjectRepository(FantasyTeamRanking)
     private readonly rankingRepo: Repository<FantasyTeamRanking>,
+    @InjectRepository(FantasyGameweek)
+    private readonly gameweekRepo: Repository<FantasyGameweek>,
+    @InjectRepository(FantasySquad)
+    private readonly squadRepo: Repository<FantasySquad>,
+    @InjectRepository(FantasySquadPlayer)
+    private readonly squadPlayerRepo: Repository<FantasySquadPlayer>,
+    @InjectRepository(FantasyTransfer)
+    private readonly transferRepo: Repository<FantasyTransfer>,
+    @InjectRepository(FantasyPoints)
+    private readonly pointsRepo: Repository<FantasyPoints>,
+    @InjectRepository(Player)
+    private readonly playerRepo: Repository<Player>,
   ) {
     const fantasyConfig = this.configService.get('fantasy', {
       infer: true,
     });
     this.leagueMaxParticipants = fantasyConfig?.leagueMaxParticipants ?? 200;
+  }
+
+  private getNow(): Date {
+    return this.fantasyTimeService.getNow();
+  }
+
+  private toInsightWidgetPlayerDto(player: Player): InsightWidgetPlayerDto {
+    return {
+      id: player.id,
+      name: player.name,
+      commonName: player.commonName,
+      image: player.image,
+      pool: player.pool,
+      positionCode: player.position?.code ?? '',
+      points: player.points ?? 0,
+    };
+  }
+
+  private buildInsightCard(params: {
+    title: string;
+    metricUnit: InsightMetricUnit;
+    metricLabel: string;
+    items: InsightWidgetItemDto[];
+    gameweek?: FantasyGameweek | null;
+  }): InsightWidgetCardDto {
+    return {
+      title: params.title,
+      metricUnit: params.metricUnit,
+      metricLabel: params.metricLabel,
+      items: params.items,
+      gameweekId: params.gameweek?.id ?? null,
+      gameweekCode: params.gameweek?.code ?? null,
+    };
+  }
+
+  private roundPercent(numerator: number, denominator: number): number {
+    if (!denominator) return 0;
+    return Math.round((numerator / denominator) * 100);
+  }
+
+  private computeRanksByPoints(teamIds: string[], totalsByTeamId: Map<string, number>) {
+    const rows = teamIds.map((teamId) => ({
+      teamId,
+      points: totalsByTeamId.get(teamId) ?? 0,
+    }));
+
+    rows.sort((a, b) =>
+      b.points !== a.points ? b.points - a.points : a.teamId.localeCompare(b.teamId),
+    );
+
+    const rankByTeamId = new Map<string, number>();
+    let currentRank = 1;
+    let lastPoints: number | null = null;
+
+    for (let i = 0; i < rows.length; i++) {
+      const { teamId, points } = rows[i];
+      if (lastPoints !== null && points < lastPoints) {
+        currentRank = i + 1;
+      }
+      lastPoints = points;
+      rankByTeamId.set(teamId, currentRank);
+    }
+
+    return { rankByTeamId, totalsByTeamId };
+  }
+
+  private async getLatestLockedGameweek(): Promise<FantasyGameweek | null> {
+    const now = this.getNow();
+    const gws = await this.gameweekRepo.find({
+      where: { snapshotDeadlineAt: LessThanOrEqual(now) },
+      order: { snapshotDeadlineAt: 'DESC' },
+      take: 1,
+    });
+    return gws[0] ?? null;
+  }
+
+  private async getPreviousLockedGameweek(
+    gameweek: FantasyGameweek,
+  ): Promise<FantasyGameweek | null> {
+    const gws = await this.gameweekRepo.find({
+      where: { snapshotDeadlineAt: LessThan(gameweek.snapshotDeadlineAt) },
+      order: { snapshotDeadlineAt: 'DESC' },
+      take: 1,
+    });
+    return gws[0] ?? null;
+  }
+
+  private async getLockedSquadIdsForTeams(
+    teamIds: string[],
+    gameweek: FantasyGameweek | null,
+  ): Promise<string[]> {
+    if (!teamIds.length) return [];
+
+    if (gameweek) {
+      const squads = await this.squadRepo.find({
+        where: {
+          isLocked: true,
+          gameweekId: gameweek.id,
+          teamId: In(teamIds) as any,
+        },
+        select: ['id'],
+      });
+      if (squads.length) return squads.map((s) => s.id);
+    }
+
+    // Fallback: most recent locked squad per team.
+    const allLocked = await this.squadRepo.find({
+      where: { isLocked: true, teamId: In(teamIds) as any },
+      order: { teamId: 'ASC', lockedAt: 'DESC', createdAt: 'DESC' },
+      select: ['id', 'teamId', 'lockedAt', 'createdAt'],
+    });
+
+    const picked: string[] = [];
+    const seenTeams = new Set<string>();
+    for (const s of allLocked) {
+      if (!s.teamId || seenTeams.has(s.teamId)) continue;
+      seenTeams.add(s.teamId);
+      picked.push(s.id);
+    }
+    return picked;
+  }
+
+  private async getTeamTotalsUpToGameweek(params: {
+    teamIds: string[];
+    gameweekId?: number | null;
+  }): Promise<Map<string, number>> {
+    const { teamIds, gameweekId } = params;
+    if (!teamIds.length) return new Map();
+
+    const qb = this.pointsRepo
+      .createQueryBuilder('p')
+      .select('p.teamId', 'teamId')
+      .addSelect('SUM(p.totalPoints)', 'totalPoints')
+      .where('p.teamId IN (:...teamIds)', { teamIds })
+      .andWhere('p.gameweekId IS NOT NULL');
+
+    if (gameweekId != null) {
+      qb.andWhere('p.gameweekId <= :gwId', { gwId: gameweekId });
+    }
+
+    const raw = await qb
+      .groupBy('p.teamId')
+      .orderBy('SUM(p.totalPoints)', 'DESC')
+      .getRawMany<{ teamId: string; totalPoints: string }>();
+
+    const totals = new Map<string, number>(teamIds.map((id) => [id, 0]));
+    for (const r of raw) {
+      totals.set(r.teamId, Number(r.totalPoints) || 0);
+    }
+    return totals;
   }
 
   private async generateInviteCode(): Promise<string> {
@@ -391,6 +569,226 @@ export class FantasyLeagueService {
         currentPage,
       },
       me,
+    };
+  }
+
+  async getLeagueInsights(
+    user: User,
+    leagueId: string,
+  ): Promise<LeagueInsightsResponseDto> {
+    const { team: myTeam } = await this.fantasyService.getMyTeam(user);
+
+    const league = await this.leagueRepo.findOne({
+      where: { id: leagueId },
+    });
+    if (!league) {
+      throw new NotFoundException('League not found');
+    }
+
+    const memberships = await this.membershipRepo.find({
+      where: { leagueId: league.id },
+      relations: ['team'],
+      order: { joinedAt: 'ASC' },
+    });
+    const teamIds = memberships.map((m) => m.teamId);
+
+    const myMembership = memberships.find((m) => m.teamId === myTeam.id) ?? null;
+
+    const latestLockedGw = await this.getLatestLockedGameweek();
+    const prevLockedGw = latestLockedGw
+      ? await this.getPreviousLockedGameweek(latestLockedGw)
+      : null;
+
+    const currentTotals = await this.getTeamTotalsUpToGameweek({
+      teamIds,
+      gameweekId: latestLockedGw?.id ?? null,
+    });
+    const prevTotals = prevLockedGw
+      ? await this.getTeamTotalsUpToGameweek({
+          teamIds,
+          gameweekId: prevLockedGw.id,
+        })
+      : new Map<string, number>();
+
+    const { rankByTeamId: currentRankByTeamId } = this.computeRanksByPoints(
+      teamIds,
+      currentTotals,
+    );
+    const { rankByTeamId: prevRankByTeamId } = prevLockedGw
+      ? this.computeRanksByPoints(teamIds, prevTotals)
+      : { rankByTeamId: new Map<string, number>() };
+
+    const teamById = new Map(
+      memberships
+        .map((m) => m.team)
+        .filter(Boolean)
+        .map((t) => [t.id, t]),
+    );
+
+    const allRows: LeagueInsightsTableRowDto[] = teamIds.map((teamId) => {
+      const team = teamById.get(teamId);
+      const rank = currentRankByTeamId.get(teamId) ?? 1;
+      const previousRank = prevRankByTeamId.get(teamId) ?? null;
+
+      return {
+        teamId,
+        teamName: team?.name ?? '',
+        teamLogoUrl: team?.logoUrl ?? '',
+        rank,
+        previousRank,
+        positionChange:
+          previousRank == null ? null : previousRank - (rank ?? previousRank),
+        totalPoints: currentTotals.get(teamId) ?? 0,
+        isMe: teamId === myTeam.id,
+      };
+    });
+
+    allRows.sort((a, b) => a.rank - b.rank || a.teamId.localeCompare(b.teamId));
+
+    const leaderboard = allRows.slice(0, 5);
+    const meRow = myMembership
+      ? allRows.find((r) => r.teamId === myTeam.id) ?? null
+      : null;
+
+    // League-scoped widget cards
+    const squadIds = await this.getLockedSquadIdsForTeams(teamIds, latestLockedGw);
+    const totalSquads = squadIds.length;
+
+    const squadPlayers = totalSquads
+      ? await this.squadPlayerRepo.find({
+          where: { squadId: In(squadIds) as any },
+          select: ['playerId', 'isCaptain', 'squadId'],
+        })
+      : [];
+
+    const selectedCounts = new Map<number, number>();
+    const captainCounts = new Map<number, number>();
+    for (const sp of squadPlayers) {
+      selectedCounts.set(sp.playerId, (selectedCounts.get(sp.playerId) ?? 0) + 1);
+      if (sp.isCaptain) {
+        captainCounts.set(
+          sp.playerId,
+          (captainCounts.get(sp.playerId) ?? 0) + 1,
+        );
+      }
+    }
+
+    const sortTop = (m: Map<number, number>) =>
+      [...m.entries()]
+        .map(([playerId, value]) => ({ playerId, value }))
+        .sort((a, b) => (b.value !== a.value ? b.value - a.value : a.playerId - b.playerId))
+        .slice(0, 5);
+
+    const topSelected = sortTop(selectedCounts);
+    const topCaptained = sortTop(captainCounts);
+
+    const transfersStart = prevLockedGw?.snapshotDeadlineAt ?? new Date(0);
+    const transfersEnd = latestLockedGw?.snapshotDeadlineAt ?? this.getNow();
+
+    const transferRaw = await this.transferRepo
+      .createQueryBuilder('t')
+      .select('t.playerInId', 'playerId')
+      .addSelect('COUNT(t.id)', 'value')
+      .where('t.teamId IN (:...teamIds)', { teamIds })
+      .andWhere('t.createdAt > :start', { start: transfersStart })
+      .andWhere('t.createdAt <= :end', { end: transfersEnd })
+      .groupBy('t.playerInId')
+      .orderBy('value', 'DESC')
+      .addOrderBy('t.playerInId', 'ASC')
+      .limit(5)
+      .getRawMany<{ playerId: string; value: string }>();
+
+    const topTransferred = transferRaw.map((r) => ({
+      playerId: parseInt(r.playerId, 10),
+      value: parseInt(r.value, 10) || 0,
+    }));
+
+    const performerRaw = latestLockedGw
+      ? await this.pointsRepo
+          .createQueryBuilder('p')
+          .innerJoin('p.squadPlayer', 'sp')
+          .select('sp.playerId', 'playerId')
+          .addSelect('SUM(p.totalPoints)', 'value')
+          .where('p.teamId IN (:...teamIds)', { teamIds })
+          .andWhere('p.gameweekId = :gwId', { gwId: latestLockedGw.id })
+          .groupBy('sp.playerId')
+          .orderBy('value', 'DESC')
+          .addOrderBy('sp.playerId', 'ASC')
+          .limit(5)
+          .getRawMany<{ playerId: string; value: string }>()
+      : [];
+
+    const topPerforming = performerRaw.map((r) => ({
+      playerId: parseInt(r.playerId, 10),
+      value: parseInt(r.value, 10) || 0,
+    }));
+
+    const allPlayerIds = [
+      ...new Set([
+        ...topSelected.map((x) => x.playerId),
+        ...topCaptained.map((x) => x.playerId),
+        ...topTransferred.map((x) => x.playerId),
+        ...topPerforming.map((x) => x.playerId),
+      ]),
+    ].filter((id) => Number.isFinite(id));
+
+    const players = allPlayerIds.length
+      ? await this.playerRepo.findBy({ id: In(allPlayerIds) })
+      : [];
+    const playerById = new Map<number, Player>(players.map((p) => [p.id, p]));
+
+    const toItems = (
+      list: Array<{ playerId: number; value: number }>,
+      transform: (value: number) => number,
+    ): InsightWidgetItemDto[] =>
+      list
+        .map(({ playerId, value }) => {
+          const player = playerById.get(playerId);
+          if (!player) return null;
+          return {
+            player: this.toInsightWidgetPlayerDto(player),
+            metricValue: transform(value),
+          };
+        })
+        .filter((x): x is InsightWidgetItemDto => !!x);
+
+    return {
+      leaderboard,
+      me: meRow,
+      mostSelected: this.buildInsightCard({
+        title: 'Most Selected Player',
+        metricUnit: InsightMetricUnit.PERCENT,
+        metricLabel: 'Ownership',
+        items: toItems(topSelected, (count) =>
+          this.roundPercent(count, totalSquads),
+        ),
+        gameweek: latestLockedGw,
+      }),
+      mostCaptained: this.buildInsightCard({
+        title: 'Most Captained',
+        metricUnit: InsightMetricUnit.PERCENT,
+        metricLabel: 'Captained',
+        items: toItems(topCaptained, (count) =>
+          this.roundPercent(count, totalSquads),
+        ),
+        gameweek: latestLockedGw,
+      }),
+      mostTransferred: this.buildInsightCard({
+        title: 'Most Transferred In',
+        metricUnit: InsightMetricUnit.COUNT,
+        metricLabel: 'Transfers',
+        items: toItems(topTransferred, (count) => count),
+        gameweek: latestLockedGw,
+      }),
+      bestPerforming: this.buildInsightCard({
+        title: latestLockedGw
+          ? `Top Performer (Gameweek ${latestLockedGw.code})`
+          : 'Top Performer',
+        metricUnit: InsightMetricUnit.POINTS,
+        metricLabel: 'Points',
+        items: toItems(topPerforming, (points) => points),
+        gameweek: latestLockedGw,
+      }),
     };
   }
 }

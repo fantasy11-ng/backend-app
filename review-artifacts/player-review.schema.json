@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "1.0",
+  "purpose": "Team review artifact: schema of stored and derived player stats used by compare/detail + insights features.",
+  "sections": {
+    "playerProfile": {
+      "origin": "players.player table",
+      "fields": [
+        "id",
+        "name",
+        "commonName",
+        "image",
+        "pool",
+        "positionId",
+        "position.code",
+        "countryId",
+        "externalId",
+        "rating",
+        "price"
+      ]
+    },
+    "seasonStats": {
+      "origin": "players.player table (season-to-date + Sportmonks season statistics persisted on sync)",
+      "fields": [
+        "points",
+        "goals",
+        "assists",
+        "yellowCards",
+        "redCards",
+        "minutesPlayed",
+        "appearances",
+        "lineups",
+        "starts",
+        "bench",
+        "shotsOnTarget",
+        "keyPasses"
+      ]
+    },
+    "recentFixtureStats": {
+      "origin": "players.player_fixture_stats table (per-fixture snapshots)",
+      "fields": [
+        "fixtureId",
+        "minutesPlayed",
+        "goals",
+        "assists",
+        "yellowCards",
+        "redCards",
+        "fantasyPoints",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "derivedInsightMetrics": {
+      "origin": "derived (see formulas + inputs)",
+      "fields": [
+        "ownership",
+        "priceChange",
+        "form",
+        "performanceIndex"
+      ],
+      "formulas": {
+        "ownership": "percentage of fantasy teams whose latest locked squad contains the player",
+        "priceChange": "transfer-demand formula using net transfers (ins - outs) per team over lookback window, capped and scaled",
+        "form": "average fantasyPoints over the last N fixture snapshots",
+        "performanceIndex": "weighted score over the last N fixtures plus per-appearance season support stats (shotsOnTarget/keyPasses per appearance)"
+      }
+    }
+  }
+}
+

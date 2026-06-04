@@ -85,6 +85,111 @@ export class PredictorController {
     return this.predictorService.create(req.user as User, dto);
   }
 
+  @Get('me/status')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get my prediction completion status',
+    description:
+      'Returns the overall prediction state (not_started | in_progress | complete), a progress object (completed/total/percent), and a per-section breakdown across the group stage, third-placed qualifiers (when required), and every knockout round. Drives the "Complete Your Predictions" widget.',
+  })
+  @ApiOkResponse({
+    description: 'Prediction completion status',
+    schema: {
+      example: {
+        state: 'in_progress',
+        progress: { completed: 14, total: 36, percent: 39 },
+        sections: [
+          {
+            key: 'group-stage',
+            label: 'Group Stage',
+            completed: 12,
+            total: 12,
+          },
+          {
+            key: 'third-placed-qualifiers',
+            label: 'Third-Placed Qualifiers',
+            completed: 1,
+            total: 1,
+          },
+          { key: 'r32', label: 'Round of 32', completed: 1, total: 16 },
+          { key: 'r16', label: 'Round of 16', completed: 0, total: 8 },
+          { key: 'qf', label: 'Quarter-Finals', completed: 0, total: 4 },
+          { key: 'sf', label: 'Semi-Finals', completed: 0, total: 2 },
+          { key: 'third-place', label: 'Third Place', completed: 0, total: 1 },
+          { key: 'final', label: 'Final', completed: 0, total: 1 },
+        ],
+      },
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  getMyStatus(@Req() req: Request) {
+    return this.predictorService.getPredictionStatus(req.user as User);
+  }
+
+  @Get('me/summary')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get my predictions summary',
+    description:
+      'Returns the full predictions-summary payload: an overall scoreline, a per-stage performance breakdown (accuracy, correct teams, points) for the group stage and each knockout round, and a per-match breakdown comparing your pick against the actual result with a correct/incorrect/pending status. Backs the "Predictions Summary" page.',
+  })
+  @ApiOkResponse({
+    description: 'Predictions summary',
+    schema: {
+      example: {
+        overall: {
+          points: 24,
+          correctTeams: 18,
+          totalTeams: 60,
+          accuracy: 30,
+        },
+        stages: [
+          {
+            key: 'group-stage',
+            label: 'Group Stage',
+            correctTeams: 14,
+            totalTeams: 48,
+            accuracy: 29,
+            points: 14,
+          },
+          {
+            key: 'r32',
+            label: 'Round of 32',
+            correctTeams: 4,
+            totalTeams: 16,
+            accuracy: 25,
+            points: 4,
+          },
+        ],
+        matches: [
+          {
+            round: 'r32',
+            label: 'Round of 32',
+            fixtureId: 9991,
+            predictedWinner: {
+              id: 100,
+              name: 'France',
+              short: 'FRA',
+              logo: 'url',
+            },
+            actualWinner: {
+              id: 101,
+              name: 'Canada',
+              short: 'CAD',
+              logo: 'url',
+            },
+            status: 'incorrect',
+          },
+        ],
+      },
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  getMySummary(@Req() req: Request) {
+    const user = req.user as User;
+    return this.scoringService.getPredictionSummary(user.id);
+  }
+
   @Get('me/:stageId')
   @ApiBearerAuth()
   @ApiOperation({
@@ -125,9 +230,14 @@ export class PredictorController {
   @ApiOperation({
     summary: 'Submit bracket predictions for a round',
     description:
-      "Submit winners for the specified round. Round codes: 'r16' | 'qf' | 'sf' | 'final'.",
+      "Submit winners for the specified round. Round codes: 'r32' | 'r16' | 'qf' | 'sf' | 'third-place' | 'final'. " +
+      'For third-place, submit the predicted winner of the third-place playoff (same body shape as other rounds, a single prediction). ' +
+      'Use GET /predictor/bracket/rounds to discover available rounds for the active season.',
   })
-  @ApiParam({ name: 'roundCode', enum: ['r16', 'qf', 'sf', 'final'] })
+  @ApiParam({
+    name: 'roundCode',
+    enum: ['r32', 'r16', 'qf', 'sf', 'third-place', 'final'],
+  })
   @ApiBody({ type: BracketPredictionDto })
   @ApiOkResponse({
     description: 'Saved bracket predictions',
@@ -188,16 +298,41 @@ export class PredictorController {
     return this.predictorService.getGroupsWithMine(req.user as User);
   }
 
+  @Get('bracket/rounds')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get available knockout rounds for the active season',
+    description:
+      'Returns ordered list of round codes and expected match counts for the active season. Use this to render the bracket dynamically.',
+  })
+  @ApiOkResponse({
+    description: 'Available rounds',
+    schema: {
+      example: [
+        { roundCode: 'r32', expectedMatchCount: 16 },
+        { roundCode: 'r16', expectedMatchCount: 8 },
+        { roundCode: 'qf', expectedMatchCount: 4 },
+        { roundCode: 'sf', expectedMatchCount: 2 },
+        { roundCode: 'third-place', expectedMatchCount: 1 },
+        { roundCode: 'final', expectedMatchCount: 1 },
+      ],
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  getAvailableRounds() {
+    return this.predictorService.getAvailableRounds();
+  }
+
   @Get('bracket/:roundCode/seed')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get seeded participants for a round',
     description:
-      "Computes participants based on prior user predictions. Returns pairs for bracket rendering: 'r16' uses competition-specific seeding rules, while 'qf', 'sf', and 'final' pair winners sequentially from the previous round.",
+      'Computes participants based on prior user predictions. Uses competition-specific seeding rules for the first knockout round (r32 for WC2026, r16 for classic WC/AFCON/UCL). Subsequent rounds use bracket-spec winner-of mapping.',
   })
   @ApiParam({
     name: 'roundCode',
-    enum: ['r16', 'qf', 'sf', 'final', 'third-place'],
+    enum: ['r32', 'r16', 'qf', 'sf', 'third-place', 'final'],
   })
   @ApiOkResponse({
     description: 'Seeded participants and pairs',
@@ -247,6 +382,7 @@ export class PredictorController {
           ],
         },
         knockout: {
+          r32: { total: 4 },
           r16: { total: 8 },
           qf: { total: 9 },
           sf: { total: 8 },
@@ -268,7 +404,10 @@ export class PredictorController {
     summary: 'Get my bracket predictions for a round',
     description: "Reads back the user's submitted winners for the given round.",
   })
-  @ApiParam({ name: 'roundCode', enum: ['r16', 'qf', 'sf', 'final'] })
+  @ApiParam({
+    name: 'roundCode',
+    enum: ['r32', 'r16', 'qf', 'sf', 'third-place', 'final'],
+  })
   @ApiOkResponse({
     description: 'List of fixture predictions',
     schema: {
