@@ -65,6 +65,12 @@ export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
     positionId: [FilterOperator.EQ],
     countryId: [FilterOperator.EQ],
     pool: [FilterOperator.EQ],
+    price: [
+      FilterOperator.EQ,
+      FilterOperator.GTE,
+      FilterOperator.LTE,
+      FilterOperator.BTW,
+    ],
   },
 };
 

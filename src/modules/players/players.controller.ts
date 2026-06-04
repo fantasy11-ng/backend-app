@@ -3,7 +3,10 @@ import { PlayersService } from './players.service';
 import { Paginate, PaginateQuery } from 'nestjs-paginate';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PlayerPaginatedResponseDto } from './dto/player-paginated-response.dto';
-import { MultiPlayerCompareDto, PlayerDetailDto } from './dto/player-insights.dto';
+import {
+  MultiPlayerCompareDto,
+  PlayerDetailDto,
+} from './dto/player-insights.dto';
 
 @ApiTags('Players')
 @Controller('players')
@@ -14,7 +17,7 @@ export class PlayersController {
   @ApiOperation({
     summary: 'List players for the current season',
     description:
-      'Returns a paginated list of players synced from Sportmonks, filterable by position, country and pool, and sortable by rating or price.',
+      'Returns a paginated list of players synced from Sportmonks, filterable by position, country, pool and price range (e.g. filter.price=$gte:5000000, filter.price=$lte:8000000, or filter.price=$btw:5000000,8000000), and sortable by rating or price.',
   })
   @ApiOkResponse({
     description: 'Paginated list of players',
