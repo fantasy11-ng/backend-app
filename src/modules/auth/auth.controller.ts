@@ -156,8 +156,6 @@ export class AuthController {
   }
 
   @Post('password/reset')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Reset password using reset token' })
   @ApiOkResponse({ type: MessageResponse })
   @ApiBody({ type: ResetPasswordDto })
