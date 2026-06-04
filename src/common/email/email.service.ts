@@ -1,23 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { render } from '@react-email/components';
 import { Resend } from 'resend';
 import { MainConfig } from '../config/main.config';
-import * as fs from 'fs';
-import * as path from 'path';
+import { EmailVerificationEmail } from './templates/email-verification';
+import { PasswordResetEmail } from './templates/password-reset';
 
 @Injectable()
 export class EmailService {
   private resend: Resend;
+  private readonly from: string;
   constructor(private readonly configService: ConfigService<MainConfig>) {
     const emailConfig = configService.get('email', { infer: true });
     this.resend = new Resend(emailConfig.resend.apiKey);
-  }
-
-  interpolateTemplate(templatePath: string, data: Record<string, any>) {
-    const template = fs.readFileSync(templatePath, { encoding: 'utf-8' });
-    return template.replace(/{{\s*([^}]+)\s*}}/g, (_, key) => {
-      return data[key];
-    });
+    this.from = emailConfig.from;
   }
 
   async sendEmailVerification({
@@ -32,16 +28,15 @@ export class EmailService {
     const clientConfig = this.configService.get('client', { infer: true });
     const link = `${clientConfig.url}/auth/verify-email?token=${token}`;
 
-    const message = this.interpolateTemplate(
-      path.join(__dirname, './templates/email-verification.html'),
-      { name, verificationLink: link },
+    const html = await render(
+      EmailVerificationEmail({ name, verificationLink: link }),
     );
 
     const { data, error } = await this.resend.emails.send({
-      from: 'Acme <onboarding@resend.dev>',
+      from: this.from,
       to: [email],
       subject: 'Email Verification',
-      html: message,
+      html,
     });
 
     if (error) {
@@ -62,17 +57,16 @@ export class EmailService {
   }) {
     const clientConfig = this.configService.get('client', { infer: true });
     const link = `${clientConfig.url}/auth/reset-password?token=${token}`;
-    console.log(path.join(__dirname, 'templates/password-reset.html'));
-    const message = this.interpolateTemplate(
-      path.join(__dirname, 'templates/password-reset.html'),
-      { name, passwordResetLink: link },
+
+    const html = await render(
+      PasswordResetEmail({ name, passwordResetLink: link }),
     );
 
     const { data, error } = await this.resend.emails.send({
-      from: 'Acme <onboarding@resend.dev>',
+      from: this.from,
       to: [email],
       subject: 'Password Reset',
-      html: message,
+      html,
     });
 
     if (error) {
