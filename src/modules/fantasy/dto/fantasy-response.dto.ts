@@ -5,7 +5,7 @@ import { FantasyTeamRanking } from '../entities/fantasy-team-ranking.entity';
 import { FantasyBoost } from '../entities/fantasy-boost.entity';
 import { FantasyTransfer } from '../entities/fantasy-transfer.entity';
 import { FantasyTeamEvent } from '../entities/fantasy-team-event.entity';
-import { FantasyBoostType } from '../fantasy.types';
+import { FantasyBoostType, FantasyGameweekPhase } from '../fantasy.types';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { FantasyGameweek } from '../entities/fantasy-gameweek.entity';
 import { Player } from '@/modules/players/entities/player.entity';
@@ -195,6 +195,29 @@ export class FantasyRankingListResponseDto {
   } | null;
 }
 
+export class FixtureGameweekDto {
+  @ApiProperty()
+  id: number;
+
+  @ApiProperty()
+  code: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty({ enum: FantasyGameweekPhase })
+  phase: FantasyGameweekPhase;
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  firstKickoffAt: Date;
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  snapshotDeadlineAt: Date;
+
+  @ApiProperty()
+  isActive: boolean;
+}
+
 export class UpcomingFixtureDto {
   @ApiProperty()
   id: number;
@@ -207,6 +230,9 @@ export class UpcomingFixtureDto {
 
   @ApiProperty({ nullable: true })
   gameweekId?: number | null;
+
+  @ApiProperty({ type: FixtureGameweekDto, nullable: true })
+  gameweek?: FixtureGameweekDto | null;
 
   @ApiProperty({ type: FootballTeam, isArray: true })
   participants: FootballTeam[];

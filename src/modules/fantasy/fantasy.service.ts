@@ -996,11 +996,22 @@ export class FantasyService {
     });
     const teamById = new Map(teams.map((t) => [t.id, t]));
 
+    const gameweek = {
+      id: targetGameweek.id,
+      code: targetGameweek.code,
+      name: targetGameweek.name,
+      phase: targetGameweek.phase,
+      firstKickoffAt: targetGameweek.firstKickoffAt,
+      snapshotDeadlineAt: targetGameweek.snapshotDeadlineAt,
+      isActive: targetGameweek.isActive,
+    };
+
     return fixtures.map((f) => ({
       id: f.id,
       startingAt: f.startingAt,
       stageId: f.stageId,
       gameweekId: f.gameweekId,
+      gameweek,
       participants: f.participantTeamIds.map((id) => teamById.get(id)),
     }));
   }
