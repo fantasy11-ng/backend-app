@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { SportmonksPlayersService } from '@/common/sportmonks/services/players.service';
+import { SportmonksStandingsService } from '@/common/sportmonks/services/standings.service';
 import { DataSource, IsNull } from 'typeorm';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { Player } from './entities/player.entity';
@@ -33,6 +34,27 @@ import {
   toPlayerDetailDto,
   toPlayerStatLeaderDto,
 } from './player-insights.mapper';
+import { TeamStatDto } from './dto/team-stats.dto';
+
+const STANDING_TYPE = {
+  played: 129,
+  wins: 130,
+  draws: 131,
+  losses: 132,
+  goals: 133,
+  conceded: 134,
+  goalDifference: 179,
+} as const;
+
+type StandingDetailRow = {
+  type_id?: number;
+  value?: number | string | null;
+};
+
+type StandingRow = {
+  participant?: { country_id?: number };
+  details?: StandingDetailRow[];
+};
 
 const SEASON_STAT_TYPE_IDS = [86, 117, 119, 321, 322, 323];
 const pickPositiveId = (...candidates: Array<number | null | undefined>) => {
@@ -87,8 +109,14 @@ export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
 
 @Injectable()
 export class PlayersService {
+  private teamStatsCache: { data: TeamStatDto[]; fetchedAt: number } | null =
+    null;
+
+  private static readonly TEAM_STATS_CACHE_MS = 60 * 60 * 1000;
+
   constructor(
     private sportmonksPlayersService: SportmonksPlayersService,
+    private sportmonksStandingsService: SportmonksStandingsService,
     private settingsService: SettingsService,
     private footballService: FootballService,
     @InjectDataSource() private db: DataSource,
@@ -652,5 +680,113 @@ export class PlayersService {
           })
         : null,
     };
+  }
+
+  private getStandingStatValue(
+    details: StandingDetailRow[] | undefined,
+    typeId: number,
+  ): number {
+    const entry = details?.find((d) => d.type_id === typeId);
+    if (entry?.value === null || entry?.value === undefined || entry?.value === '') {
+      return 0;
+    }
+    const num = Number(entry.value);
+    return Number.isFinite(num) ? num : 0;
+  }
+
+  private collectStandingRows(standingsPayload: any[]): StandingRow[] {
+    const rows: StandingRow[] = [];
+
+    for (const item of standingsPayload ?? []) {
+      if (Array.isArray(item?.groups)) {
+        for (const group of item.groups) {
+          if (Array.isArray(group?.standings)) {
+            rows.push(...group.standings);
+          }
+        }
+      }
+      if (Array.isArray(item?.standings)) {
+        rows.push(...item.standings);
+      }
+    }
+
+    return rows;
+  }
+
+  async getTeamStats(): Promise<TeamStatDto[]> {
+    const now = Date.now();
+    if (
+      this.teamStatsCache &&
+      now - this.teamStatsCache.fetchedAt <
+        PlayersService.TEAM_STATS_CACHE_MS
+    ) {
+      return this.teamStatsCache.data;
+    }
+
+    const league = await this.settingsService.getMainServiceLeague();
+    const seasonId = league?.currentSeason?.serviceId;
+    if (!seasonId) {
+      return [];
+    }
+
+    const payload =
+      await this.sportmonksStandingsService.getSeasonStandingsWithDetails(
+        seasonId,
+      );
+
+    const byCountry = new Map<number, TeamStatDto>();
+
+    for (const row of this.collectStandingRows(payload)) {
+      const countryId = Number(row.participant?.country_id ?? 0);
+      if (!countryId) continue;
+
+      const played = this.getStandingStatValue(
+        row.details,
+        STANDING_TYPE.played,
+      );
+      const wins = this.getStandingStatValue(row.details, STANDING_TYPE.wins);
+      const draws = this.getStandingStatValue(row.details, STANDING_TYPE.draws);
+      const losses = this.getStandingStatValue(
+        row.details,
+        STANDING_TYPE.losses,
+      );
+      const goals = this.getStandingStatValue(row.details, STANDING_TYPE.goals);
+      const conceded = this.getStandingStatValue(
+        row.details,
+        STANDING_TYPE.conceded,
+      );
+      let goalDifference = this.getStandingStatValue(
+        row.details,
+        STANDING_TYPE.goalDifference,
+      );
+      if (goalDifference === 0 && goals !== conceded) {
+        goalDifference = goals - conceded;
+      }
+
+      const existing = byCountry.get(countryId);
+      if (existing && existing.played >= played) continue;
+
+      byCountry.set(countryId, {
+        countryId,
+        played,
+        wins,
+        goals,
+        conceded,
+        goalDifference,
+        draws,
+        losses,
+      });
+    }
+
+    const stats = Array.from(byCountry.values()).sort((a, b) => {
+      if (b.goals !== a.goals) return b.goals - a.goals;
+      if (b.goalDifference !== a.goalDifference) {
+        return b.goalDifference - a.goalDifference;
+      }
+      return a.countryId - b.countryId;
+    });
+
+    this.teamStatsCache = { data: stats, fetchedAt: now };
+    return stats;
   }
 }

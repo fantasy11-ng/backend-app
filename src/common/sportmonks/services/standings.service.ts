@@ -25,4 +25,23 @@ export class SportmonksStandingsService {
       throw new BadGatewayException(e);
     }
   }
+
+  async getSeasonStandingsWithDetails(seasonId: number) {
+    try {
+      const { data } = await firstValueFrom(
+        this.http.get<SportmonksResponse<any>>(
+          `/football/standings/seasons/${seasonId}`,
+          {
+            params: {
+              include: 'standings.participant;standings.details.type;groups',
+              per_page: 50,
+            },
+          },
+        ),
+      );
+      return data.data;
+    } catch (e) {
+      throw new BadGatewayException(e);
+    }
+  }
 }
