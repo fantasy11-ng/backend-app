@@ -17,7 +17,7 @@ export class PlayersController {
   @ApiOperation({
     summary: 'List players for the current season',
     description:
-      'Returns a paginated list of players synced from Sportmonks, filterable by position, country, pool and price range (e.g. filter.price=$gte:5000000, filter.price=$lte:8000000, or filter.price=$btw:5000000,8000000), and sortable by rating or price.',
+      'Returns a paginated list of players synced from Sportmonks, filterable by position, country, pool and price range (e.g. filter.price=$gte:5000000, filter.price=$lte:8000000, or filter.price=$btw:5000000,8000000). Sortable by points, price, rating, goals, assists, cards, clean sheets, minutes, appearances, lineups, starts, bench, shots on target and key passes. Defaults to points DESC, price DESC. Null stat values sort last.',
   })
   @ApiOkResponse({
     description: 'Paginated list of players',
