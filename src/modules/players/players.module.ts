@@ -2,6 +2,7 @@ import { Injectable, Logger, Module, OnModuleInit } from '@nestjs/common';
 import { PlayersService } from './players.service';
 import { SportmonksModule } from '@/common/sportmonks/sportmonks.module';
 import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
 import { Player } from './entities/player.entity';
 import { PlayerFixtureStats } from './entities/player-fixture-stats.entity';
 import { FootballModule } from '@/common/football/football.module';
@@ -87,6 +88,7 @@ END $$;
     SportmonksModule,
     FootballModule,
     SettingsModule,
+    ConfigModule,
   ],
   controllers: [PlayersController],
   providers: [PlayersService, PlayersSchemaInitService],

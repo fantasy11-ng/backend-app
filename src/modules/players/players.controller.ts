@@ -8,6 +8,7 @@ import {
   PlayerDetailDto,
   PlayerStatLeadersResponseDto,
 } from './dto/player-insights.dto';
+import { TeamStatDto } from './dto/team-stats.dto';
 
 @ApiTags('Players')
 @Controller('players')
@@ -73,6 +74,21 @@ export class PlayersController {
   })
   async getPlayerStatLeaders() {
     return await this.playersService.getPlayerStatLeaders();
+  }
+
+  @Get('team-stats')
+  @ApiOperation({
+    summary: 'Get national team tournament stats',
+    description:
+      'Returns aggregated team stats (played, wins, goals, conceded, goal difference, draws, losses) from Sportmonks season standings. Cached for one hour.',
+  })
+  @ApiOkResponse({
+    description: 'National team stats',
+    type: TeamStatDto,
+    isArray: true,
+  })
+  async getTeamStats() {
+    return await this.playersService.getTeamStats();
   }
 
   @Get(':id')

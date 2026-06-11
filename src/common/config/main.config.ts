@@ -49,6 +49,15 @@ export const mainConfig = () => {
       allowPredictionsAfterKickoff:
         process.env.PREDICTOR_ALLOW_AFTER_KICKOFF === 'true',
     },
+    teamStats: {
+      seasonOverride:
+        parseInt(
+          process.env.TEAM_STATS_SEASON_ID ||
+            process.env.PREDICTOR_SEASON_ID ||
+            '0',
+          10,
+        ) || undefined,
+    },
     fantasy: fantasyConfig(),
   };
 };

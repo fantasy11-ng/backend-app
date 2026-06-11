@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { SportmonksPlayersService } from '@/common/sportmonks/services/players.service';
+import { SportmonksStandingsService } from '@/common/sportmonks/services/standings.service';
 import { DataSource, IsNull } from 'typeorm';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { Player } from './entities/player.entity';
@@ -33,6 +35,8 @@ import {
   toPlayerDetailDto,
   toPlayerStatLeaderDto,
 } from './player-insights.mapper';
+import { TeamStatDto } from './dto/team-stats.dto';
+import { MainConfig } from '@/common/config/main.config';
 
 const SEASON_STAT_TYPE_IDS = [86, 117, 119, 321, 322, 323];
 const pickPositiveId = (...candidates: Array<number | null | undefined>) => {
@@ -87,10 +91,17 @@ export const PLAYER_PAGINATION_CONFIG: PaginateConfig<Player> = {
 
 @Injectable()
 export class PlayersService {
+  private teamStatsCache: { data: TeamStatDto[]; fetchedAt: number } | null =
+    null;
+
+  private static readonly TEAM_STATS_CACHE_MS = 60 * 60 * 1000;
+
   constructor(
     private sportmonksPlayersService: SportmonksPlayersService,
+    private sportmonksStandingsService: SportmonksStandingsService,
     private settingsService: SettingsService,
     private footballService: FootballService,
+    private configService: ConfigService<MainConfig>,
     @InjectDataSource() private db: DataSource,
   ) {}
 
@@ -652,5 +663,63 @@ export class PlayersService {
           })
         : null,
     };
+  }
+
+  private async getTeamStatsFromPlayersDb(): Promise<TeamStatDto[]> {
+    const rows = await this.db
+      .getRepository(Player)
+      .createQueryBuilder('p')
+      .select('p.countryId', 'countryId')
+      .addSelect('SUM(p.goals)', 'goals')
+      .where('p.countryId > 0')
+      .groupBy('p.countryId')
+      .getRawMany<{ countryId: string; goals: string }>();
+
+    return rows
+      .map((row) => ({
+        countryId: Number(row.countryId),
+        played: 0,
+        wins: 0,
+        goals: Number(row.goals) || 0,
+        conceded: 0,
+        goalDifference: 0,
+        draws: 0,
+        losses: 0,
+      }))
+      .sort((a, b) => b.goals - a.goals);
+  }
+
+  async getTeamStats(): Promise<TeamStatDto[]> {
+    const now = Date.now();
+    if (
+      this.teamStatsCache &&
+      now - this.teamStatsCache.fetchedAt <
+        PlayersService.TEAM_STATS_CACHE_MS
+    ) {
+      return this.teamStatsCache.data;
+    }
+
+    const league = await this.settingsService.getMainServiceLeague();
+    const seasonOverride = this.configService.get('teamStats.seasonOverride', {
+      infer: true,
+    });
+    const seasonId = seasonOverride ?? league?.currentSeason?.serviceId;
+    const leagueId = league?.serviceId;
+
+    if (!seasonId) {
+      return [];
+    }
+
+    let stats = await this.sportmonksStandingsService.getNationalTeamStats(
+      seasonId,
+      leagueId,
+    );
+
+    if (stats.length === 0) {
+      stats = await this.getTeamStatsFromPlayersDb();
+    }
+
+    this.teamStatsCache = { data: stats, fetchedAt: now };
+    return stats;
   }
 }
