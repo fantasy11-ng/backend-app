@@ -6,6 +6,7 @@ import { PlayerPaginatedResponseDto } from './dto/player-paginated-response.dto'
 import {
   MultiPlayerCompareDto,
   PlayerDetailDto,
+  PlayerStatLeadersResponseDto,
 } from './dto/player-insights.dto';
 
 @ApiTags('Players')
@@ -58,6 +59,20 @@ export class PlayersController {
       .filter((id) => Number.isFinite(id));
 
     return await this.playersService.comparePlayers(parsedIds);
+  }
+
+  @Get('leaders')
+  @ApiOperation({
+    summary: 'Get season stat leaders',
+    description:
+      'Returns the players with the most season points, goals, assists, and the player most selected across current fantasy squads in a single response.',
+  })
+  @ApiOkResponse({
+    description: 'Season stat leaders',
+    type: PlayerStatLeadersResponseDto,
+  })
+  async getPlayerStatLeaders() {
+    return await this.playersService.getPlayerStatLeaders();
   }
 
   @Get(':id')
