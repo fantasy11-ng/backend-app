@@ -574,20 +574,24 @@ describe('PlayersService', () => {
         ...overrides,
       }) as Player;
 
-    findOne.mockImplementation(async (options?: { order?: Record<string, string>; where?: { id: number } }) => {
-      if (options?.where?.id === 42) {
-        return buildPlayer({ id: 42, name: 'Most Selected', points: 70, goals: 4, assists: 2 });
-      }
-
+    find.mockImplementation(async (options?: { order?: Record<string, string> }) => {
       const order = options?.order ?? {};
       if (order.points === 'DESC') {
-        return buildPlayer({ id: 1, points: 120, goals: 10, assists: 5 });
+        return [buildPlayer({ id: 1, points: 120, goals: 10, assists: 5 })];
       }
       if (order.goals === 'DESC') {
-        return buildPlayer({ id: 2, points: 90, goals: 15, assists: 1 });
+        return [buildPlayer({ id: 2, points: 90, goals: 15, assists: 1 })];
       }
       if (order.assists === 'DESC') {
-        return buildPlayer({ id: 3, points: 80, goals: 6, assists: 12 });
+        return [buildPlayer({ id: 3, points: 80, goals: 6, assists: 12 })];
+      }
+
+      return [];
+    });
+
+    findOne.mockImplementation(async (options?: { where?: { id: number } }) => {
+      if (options?.where?.id === 42) {
+        return buildPlayer({ id: 42, name: 'Most Selected', points: 70, goals: 4, assists: 2 });
       }
 
       return null;
@@ -615,5 +619,24 @@ describe('PlayersService', () => {
     expect(leaders.mostSelected?.metricValue).toBe(3);
     expect(leaders.mostSelected?.insights?.selectedTeams).toBe(3);
     expect(leaders.mostSelected?.insights?.ownership).toBe(75);
+  });
+
+  it('uses find with take instead of findOne when resolving stat leaders', async () => {
+    find.mockResolvedValue([]);
+
+    await service.getPlayerStatLeaders();
+
+    expect(find).toHaveBeenCalledWith({
+      order: { points: 'DESC', id: 'ASC' },
+      take: 1,
+    });
+    expect(find).toHaveBeenCalledWith({
+      order: { goals: 'DESC', id: 'ASC' },
+      take: 1,
+    });
+    expect(find).toHaveBeenCalledWith({
+      order: { assists: 'DESC', id: 'ASC' },
+      take: 1,
+    });
   });
 });

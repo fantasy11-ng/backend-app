@@ -574,17 +574,19 @@ export class PlayersService {
   async getPlayerStatLeaders(): Promise<PlayerStatLeadersResponseDto> {
     const playersRepo = this.db.getRepository(Player);
 
+    const findTopBy = (column: 'points' | 'goals' | 'assists') =>
+      playersRepo
+        .find({
+          order: { [column]: 'DESC', id: 'ASC' },
+          take: 1,
+        })
+        .then((rows) => rows[0] ?? null);
+
     const [mostPoints, mostGoals, mostAssists, mostSelectedRow, totalTeamsRow] =
       await Promise.all([
-        playersRepo.findOne({
-          order: { points: 'DESC', id: 'ASC' },
-        }),
-        playersRepo.findOne({
-          order: { goals: 'DESC', id: 'ASC' },
-        }),
-        playersRepo.findOne({
-          order: { assists: 'DESC', id: 'ASC' },
-        }),
+        findTopBy('points'),
+        findTopBy('goals'),
+        findTopBy('assists'),
         this.db.query<
           { playerId: number; selectedTeams: string }[]
         >(
