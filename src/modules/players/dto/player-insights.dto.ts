@@ -206,3 +206,39 @@ export class MultiPlayerCompareDto {
   @ApiProperty({ type: PlayerCompareItemDto, isArray: true })
   players: PlayerCompareItemDto[];
 }
+
+export class PlayerStatLeaderDto {
+  @ApiProperty({ type: PlayerSummaryDto })
+  player: PlayerSummaryDto;
+
+  @ApiProperty({ type: PlayerSeasonStatsDto })
+  season: PlayerSeasonStatsDto;
+
+  @ApiProperty({
+    type: PlayerInsightMetricsDto,
+    required: false,
+    description:
+      'Ownership metrics. Populated for mostSelected (selectedTeams and ownership percentage).',
+  })
+  insights?: PlayerInsightMetricsDto;
+
+  @ApiProperty({
+    description:
+      'Leaderboard value for this card: season points, goals, assists, or squad selection count.',
+  })
+  metricValue: number;
+}
+
+export class PlayerStatLeadersResponseDto {
+  @ApiProperty({ type: PlayerStatLeaderDto, nullable: true })
+  mostPoints: PlayerStatLeaderDto | null;
+
+  @ApiProperty({ type: PlayerStatLeaderDto, nullable: true })
+  mostGoals: PlayerStatLeaderDto | null;
+
+  @ApiProperty({ type: PlayerStatLeaderDto, nullable: true })
+  mostAssists: PlayerStatLeaderDto | null;
+
+  @ApiProperty({ type: PlayerStatLeaderDto, nullable: true })
+  mostSelected: PlayerStatLeaderDto | null;
+}

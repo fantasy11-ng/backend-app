@@ -546,4 +546,74 @@ describe('PlayersService', () => {
 
     expect(compare.players.map((entry) => entry.player.id)).toEqual([9, 7]);
   });
+
+  it('returns season stat leaders and the most selected player from current squads', async () => {
+    const buildPlayer = (overrides: Partial<Player>): Player =>
+      ({
+        id: 1,
+        name: 'Player One',
+        commonName: 'One',
+        image: 'https://cdn.example.com/one.png',
+        pool: 'STAR',
+        positionId: 3,
+        position: {
+          id: 3,
+          name: 'Forward',
+          code: 'FWD',
+          developer_name: 'forward',
+        },
+        countryId: 250,
+        externalId: 1001,
+        rating: 80,
+        goals: 10,
+        assists: 5,
+        yellowCards: 0,
+        redCards: 0,
+        points: 120,
+        price: 9000000,
+        ...overrides,
+      }) as Player;
+
+    findOne.mockImplementation(async (options?: { order?: Record<string, string>; where?: { id: number } }) => {
+      if (options?.where?.id === 42) {
+        return buildPlayer({ id: 42, name: 'Most Selected', points: 70, goals: 4, assists: 2 });
+      }
+
+      const order = options?.order ?? {};
+      if (order.points === 'DESC') {
+        return buildPlayer({ id: 1, points: 120, goals: 10, assists: 5 });
+      }
+      if (order.goals === 'DESC') {
+        return buildPlayer({ id: 2, points: 90, goals: 15, assists: 1 });
+      }
+      if (order.assists === 'DESC') {
+        return buildPlayer({ id: 3, points: 80, goals: 6, assists: 12 });
+      }
+
+      return null;
+    });
+
+    dataSourceQuery.mockImplementation(async (sql: string) => {
+      if (/COUNT\(\*\)::int AS "totalTeams"/.test(sql)) {
+        return [{ totalTeams: 4 }];
+      }
+      if (/GROUP BY sp\."playerId"/.test(sql)) {
+        return [{ playerId: 42, selectedTeams: 3 }];
+      }
+      return [];
+    });
+
+    const leaders = await service.getPlayerStatLeaders();
+
+    expect(leaders.mostPoints?.player.id).toBe(1);
+    expect(leaders.mostPoints?.metricValue).toBe(120);
+    expect(leaders.mostGoals?.player.id).toBe(2);
+    expect(leaders.mostGoals?.metricValue).toBe(15);
+    expect(leaders.mostAssists?.player.id).toBe(3);
+    expect(leaders.mostAssists?.metricValue).toBe(12);
+    expect(leaders.mostSelected?.player.id).toBe(42);
+    expect(leaders.mostSelected?.metricValue).toBe(3);
+    expect(leaders.mostSelected?.insights?.selectedTeams).toBe(3);
+    expect(leaders.mostSelected?.insights?.ownership).toBe(75);
+  });
 });

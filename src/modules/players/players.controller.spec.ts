@@ -11,6 +11,7 @@ describe('PlayersController', () => {
     getPlayerDetail: jest.Mock;
     comparePlayers: jest.Mock;
     syncPlayers: jest.Mock;
+    getPlayerStatLeaders: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -19,6 +20,7 @@ describe('PlayersController', () => {
       getPlayerDetail: jest.fn(),
       comparePlayers: jest.fn(),
       syncPlayers: jest.fn(),
+      getPlayerStatLeaders: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -67,7 +69,24 @@ describe('PlayersController', () => {
     expect(playersService.getPlayers).toHaveBeenCalledWith(query);
   });
 
-  it('declares the sync route before the dynamic id route to avoid shadowing', () => {
+  it('forwards stat leader requests to the service', async () => {
+    playersService.getPlayerStatLeaders.mockResolvedValue({
+      mostPoints: { player: { id: 1 }, metricValue: 120 },
+      mostGoals: null,
+      mostAssists: null,
+      mostSelected: null,
+    });
+
+    await expect(controller.getPlayerStatLeaders()).resolves.toEqual({
+      mostPoints: { player: { id: 1 }, metricValue: 120 },
+      mostGoals: null,
+      mostAssists: null,
+      mostSelected: null,
+    });
+    expect(playersService.getPlayerStatLeaders).toHaveBeenCalled();
+  });
+
+  it('declares static routes before the dynamic id route to avoid shadowing', () => {
     const prototype = PlayersController.prototype;
     const methodNames = Object.getOwnPropertyNames(prototype).filter(
       (name) => name !== 'constructor',
@@ -78,10 +97,20 @@ describe('PlayersController', () => {
     }));
 
     const syncIndex = routes.findIndex((route) => route.name === 'syncPlayers');
+    const compareIndex = routes.findIndex(
+      (route) => route.name === 'comparePlayers',
+    );
+    const leadersIndex = routes.findIndex(
+      (route) => route.name === 'getPlayerStatLeaders',
+    );
     const detailIndex = routes.findIndex((route) => route.name === 'getPlayerDetail');
 
     expect(routes[syncIndex]?.path).toBe('sync');
+    expect(routes[compareIndex]?.path).toBe('compare');
+    expect(routes[leadersIndex]?.path).toBe('leaders');
     expect(routes[detailIndex]?.path).toBe(':id');
     expect(syncIndex).toBeLessThan(detailIndex);
+    expect(compareIndex).toBeLessThan(detailIndex);
+    expect(leadersIndex).toBeLessThan(detailIndex);
   });
 });

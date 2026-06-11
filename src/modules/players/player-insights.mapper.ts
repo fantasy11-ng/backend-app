@@ -6,6 +6,7 @@ import {
   PlayerInsightMetricsDto,
   PlayerRecentFixtureStatsDto,
   PlayerSeasonStatsDto,
+  PlayerStatLeaderDto,
   PlayerSummaryDto,
 } from './dto/player-insights.dto';
 import { Player } from './entities/player.entity';
@@ -233,4 +234,25 @@ export const toMultiPlayerCompareDto = (
   players: PlayerInsightsMapperInput[],
 ): MultiPlayerCompareDto => ({
   players: players.map((player) => toPlayerCompareItemDto(player)),
+});
+
+export const toPlayerStatLeaderDto = ({
+  player,
+  metricValue,
+  insights,
+  computedMetrics,
+}: {
+  player: Player;
+  metricValue: number;
+  insights?: PlayerInsightMetricsInput;
+  computedMetrics?: PlayerComputedMetricsInput;
+}): PlayerStatLeaderDto => ({
+  player: toPlayerSummaryDto(player),
+  season: toPlayerSeasonStatsDto(player),
+  metricValue,
+  ...(insights || computedMetrics
+    ? {
+        insights: toPlayerInsightMetricsDto(insights, computedMetrics),
+      }
+    : {}),
 });

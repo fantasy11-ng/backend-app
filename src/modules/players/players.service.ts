@@ -26,10 +26,12 @@ import {
   MultiPlayerCompareDto,
   PlayerDetailDto,
   PlayerGameweekPointsDto,
+  PlayerStatLeadersResponseDto,
 } from './dto/player-insights.dto';
 import {
   toMultiPlayerCompareDto,
   toPlayerDetailDto,
+  toPlayerStatLeaderDto,
 } from './player-insights.mapper';
 
 const SEASON_STAT_TYPE_IDS = [86, 117, 119, 321, 322, 323];
@@ -564,5 +566,89 @@ export class PlayersService {
       .createQueryBuilder('player')
       .whereInIds(playersIds)
       .getMany();
+  }
+
+  /**
+   * Season stat leaders plus the player most selected across current fantasy squads.
+   */
+  async getPlayerStatLeaders(): Promise<PlayerStatLeadersResponseDto> {
+    const playersRepo = this.db.getRepository(Player);
+
+    const [mostPoints, mostGoals, mostAssists, mostSelectedRow, totalTeamsRow] =
+      await Promise.all([
+        playersRepo.findOne({
+          order: { points: 'DESC', id: 'ASC' },
+        }),
+        playersRepo.findOne({
+          order: { goals: 'DESC', id: 'ASC' },
+        }),
+        playersRepo.findOne({
+          order: { assists: 'DESC', id: 'ASC' },
+        }),
+        this.db.query<
+          { playerId: number; selectedTeams: string }[]
+        >(
+          `
+          SELECT sp."playerId" AS "playerId",
+                 COUNT(DISTINCT s."id")::int AS "selectedTeams"
+          FROM fantasy_squad_player sp
+          INNER JOIN fantasy_squad s ON s.id = sp."squadId"
+          WHERE s."isCurrent" = true
+          GROUP BY sp."playerId"
+          ORDER BY "selectedTeams" DESC, sp."playerId" ASC
+          LIMIT 1
+          `,
+        ),
+        this.db.query<{ totalTeams: string }[]>(
+          `SELECT COUNT(*)::int AS "totalTeams" FROM fantasy_squad WHERE "isCurrent" = true`,
+        ),
+      ]);
+
+    const totalTeams = Number(totalTeamsRow[0]?.totalTeams) || 0;
+    const mostSelectedPlayerId = mostSelectedRow[0]?.playerId
+      ? Number(mostSelectedRow[0].playerId)
+      : null;
+    const mostSelectedCount = mostSelectedRow[0]?.selectedTeams
+      ? Number(mostSelectedRow[0].selectedTeams) || 0
+      : 0;
+
+    const mostSelectedPlayer =
+      mostSelectedPlayerId != null
+        ? await playersRepo.findOne({ where: { id: mostSelectedPlayerId } })
+        : null;
+
+    return {
+      mostPoints: mostPoints
+        ? toPlayerStatLeaderDto({
+            player: mostPoints,
+            metricValue: mostPoints.points ?? 0,
+          })
+        : null,
+      mostGoals: mostGoals
+        ? toPlayerStatLeaderDto({
+            player: mostGoals,
+            metricValue: mostGoals.goals ?? 0,
+          })
+        : null,
+      mostAssists: mostAssists
+        ? toPlayerStatLeaderDto({
+            player: mostAssists,
+            metricValue: mostAssists.assists ?? 0,
+          })
+        : null,
+      mostSelected: mostSelectedPlayer
+        ? toPlayerStatLeaderDto({
+            player: mostSelectedPlayer,
+            metricValue: mostSelectedCount,
+            insights: { selectedTeams: mostSelectedCount },
+            computedMetrics: {
+              ownership: {
+                selectedTeams: mostSelectedCount,
+                totalTeams,
+              },
+            },
+          })
+        : null,
+    };
   }
 }
