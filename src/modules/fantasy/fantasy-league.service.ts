@@ -245,6 +245,7 @@ export class FantasyLeagueService {
 
     const league = this.leagueRepo.create({
       name: dto.name.trim(),
+      logoUrl: dto.logoUrl ?? '',
       isPublic,
       inviteCode,
       ownerId: user.id,
@@ -269,6 +270,7 @@ export class FantasyLeagueService {
       league: {
         id: league.id,
         name: league.name,
+        logoUrl: league.logoUrl,
         isPublic: league.isPublic,
         inviteCode: league.inviteCode,
         participantCount,
