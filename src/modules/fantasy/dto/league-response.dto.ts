@@ -9,6 +9,9 @@ export class FantasyLeagueSummaryDto {
   @ApiProperty()
   name: string;
 
+  @ApiProperty({ required: false })
+  logoUrl?: string;
+
   @ApiProperty()
   isPublic: boolean;
 

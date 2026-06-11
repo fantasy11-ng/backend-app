@@ -20,6 +20,9 @@ export class FantasyLeague {
   @Column()
   name: string;
 
+  @Column({ default: '' })
+  logoUrl: string;
+
   @Column({ default: false })
   isPublic: boolean;
 

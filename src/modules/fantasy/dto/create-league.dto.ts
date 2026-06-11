@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const createFantasyLeagueSchema = z.object({
   name: z.string().min(3).max(100),
   isPublic: z.boolean().optional(),
+  logoUrl: z.string().url().optional(),
 });
 
 export class CreateFantasyLeagueDto
@@ -22,6 +23,12 @@ export class CreateFantasyLeagueDto
       'Whether the league is public. If omitted or false, the league is private and uses an invite code.',
   })
   isPublic?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description: 'Public URL of the league logo (upload via /files/profile-image first)',
+  })
+  logoUrl?: string;
 }
 
 
