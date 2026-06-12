@@ -510,7 +510,10 @@ export class FantasyController {
     type: SimpleMessageResponseDto,
   })
   async recomputeFixture(@Param('fixtureId', ParseIntPipe) fixtureId: number) {
-    await this.scoringService.computeForFixture(fixtureId);
+    const result = await this.scoringService.computeForFixture(fixtureId);
+    if (result !== 'no_stats') {
+      await this.scoringService.refreshSeasonStatsForFixtures([fixtureId]);
+    }
     return { message: 'Scoring recomputed' };
   }
 

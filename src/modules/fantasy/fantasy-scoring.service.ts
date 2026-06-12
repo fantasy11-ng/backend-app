@@ -25,6 +25,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Player } from '@/modules/players/entities/player.entity';
 import { PlayerFixtureStats } from '@/modules/players/entities/player-fixture-stats.entity';
+import { PlayersService } from '@/modules/players/players.service';
 
 @Injectable()
 export class FantasyScoringService {
@@ -54,8 +55,58 @@ export class FantasyScoringService {
     private readonly fixturesService: SportmonksFixturesService,
     @InjectDataSource() private readonly db: DataSource,
     private readonly fantasyTimeService: FantasyTimeService,
+    private readonly playersService: PlayersService,
   ) {
     this.fantasyConfig = this.configService.get('fantasy', { infer: true })!;
+  }
+
+  /**
+   * Refresh season-stat fields for only the match-day squads of the given
+   * fixtures. Best-effort: collects match-day player IDs (deduped across
+   * fixtures) and refreshes them, never throwing on upstream failures.
+   *
+   * Shared by the daily job (after bulk scoring) and the single-fixture admin
+   * endpoint, so both refresh season stats the same way.
+   */
+  async refreshSeasonStatsForFixtures(
+    fixtureIds: number[],
+  ): Promise<{ requested: number; refreshed: number; failed: number }> {
+    const empty = { requested: 0, refreshed: 0, failed: 0 };
+    if (!fixtureIds?.length) return empty;
+
+    try {
+      const externalIds = new Set<number>();
+      for (const fixtureId of fixtureIds) {
+        try {
+          const ids =
+            await this.statsProvider.getMatchDayPlayerExternalIds(fixtureId);
+          for (const id of ids) externalIds.add(id);
+        } catch (e) {
+          this.logger.warn(
+            `Failed to collect match-day players for fixture ${fixtureId}: ${
+              (e as Error)?.message ?? e
+            }`,
+          );
+        }
+      }
+
+      if (!externalIds.size) return empty;
+
+      const summary =
+        await this.playersService.refreshSeasonStatsForExternalIds(
+          Array.from(externalIds),
+        );
+      this.logger.log(
+        `Season-stats refresh completed: requested=${summary.requested} refreshed=${summary.refreshed} failed=${summary.failed}`,
+      );
+      return summary;
+    } catch (e) {
+      this.logger.error(
+        `Season-stats refresh failed: ${(e as Error)?.message ?? e}`,
+        (e as Error)?.stack,
+      );
+      return empty;
+    }
   }
 
   private getNow(): Date {
