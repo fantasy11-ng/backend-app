@@ -85,13 +85,17 @@ export class FantasyScoringService {
     let scored = 0;
     let skippedNoStats = 0;
     let errors = 0;
+    const scoredFixtureIds: number[] = [];
 
     const runOne = async (fixtureId: number) => {
       processed++;
       try {
         const result = await this.computeForFixture(fixtureId);
         if (result === 'no_stats') skippedNoStats++;
-        else scored++;
+        else {
+          scored++;
+          scoredFixtureIds.push(fixtureId);
+        }
       } catch (e) {
         errors++;
         this.logger.warn(
@@ -121,6 +125,7 @@ export class FantasyScoringService {
       skippedNoStats,
       errors,
       concurrency,
+      scoredFixtureIds,
     };
   }
 

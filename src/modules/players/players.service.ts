@@ -225,6 +225,84 @@ export class PlayersService {
     });
   }
 
+  /**
+   * Fetch a single player's season-statistics payload from Sportmonks and map
+   * it to our season-stats snapshot. Shared by full sync and the targeted
+   * match-day refresh so both use one upstream contract.
+   */
+  private async fetchPlayerWithSeasonStats(
+    sportmonksPlayerId: number,
+    seasonServiceId: number,
+  ): Promise<{
+    player: SportmonksPlayer;
+    seasonStats: PlayerSeasonStatsSnapshot;
+  }> {
+    const player = await this.sportmonksPlayersService.getPlayerById(
+      sportmonksPlayerId,
+      {
+        include: 'position;statistics.details',
+        filters: `playerStatisticSeasons:${seasonServiceId};playerStatisticDetailTypes:${SEASON_STAT_TYPE_IDS.join(',')}`,
+      },
+    );
+    const seasonStats = mapSportmonksSeasonStats(player, seasonServiceId);
+    return { player, seasonStats };
+  }
+
+  /**
+   * Refresh season-stat fields (minutes, appearances, lineups, starts, bench,
+   * shotsOnTarget, keyPasses) plus rating/price for a specific set of players,
+   * identified by Sportmonks player id (externalId).
+   *
+   * Best-effort and sequential: per-player failures are logged and skipped and
+   * never abort the batch. Intended for the daily job to refresh only the
+   * players who appeared in scored fixtures.
+   */
+  async refreshSeasonStatsForExternalIds(
+    externalIds: number[],
+  ): Promise<{ requested: number; refreshed: number; failed: number }> {
+    const uniqueIds = Array.from(
+      new Set(externalIds.filter((id) => Number.isFinite(id) && id > 0)),
+    );
+    if (!uniqueIds.length) {
+      return { requested: 0, refreshed: 0, failed: 0 };
+    }
+
+    const league = await this.settingsService.getMainServiceLeague();
+    const seasonServiceId = league?.currentSeason?.serviceId;
+    if (!seasonServiceId) {
+      throw new Error(
+        'Cannot refresh season stats: no current season configured',
+      );
+    }
+
+    let refreshed = 0;
+    let failed = 0;
+
+    for (const sportmonksPlayerId of uniqueIds) {
+      try {
+        const { player, seasonStats } = await this.fetchPlayerWithSeasonStats(
+          sportmonksPlayerId,
+          seasonServiceId,
+        );
+        await this.upsertFromSportmonksPlayer({
+          sportmonksPlayerId,
+          player,
+          seasonStats,
+        });
+        refreshed++;
+      } catch (e) {
+        failed++;
+        console.warn(
+          `Failed to refresh season stats for player ${sportmonksPlayerId}: ${
+            (e as Error)?.message ?? e
+          }`,
+        );
+      }
+    }
+
+    return { requested: uniqueIds.length, refreshed, failed };
+  }
+
   async syncPlayers() {
     const league = await this.settingsService.getMainServiceLeague();
 
@@ -317,18 +395,12 @@ export class PlayersService {
             let seasonStats: PlayerSeasonStatsSnapshot | undefined = undefined;
 
             try {
-              playerWithSeasonStats =
-                await this.sportmonksPlayersService.getPlayerById(
-                  sportmonksPlayerId,
-                  {
-                    include: 'position;statistics.details',
-                    filters: `playerStatisticSeasons:${league.currentSeason.serviceId};playerStatisticDetailTypes:${SEASON_STAT_TYPE_IDS.join(',')}`,
-                  },
-                );
-              seasonStats = mapSportmonksSeasonStats(
-                playerWithSeasonStats,
+              const fetched = await this.fetchPlayerWithSeasonStats(
+                sportmonksPlayerId,
                 league.currentSeason.serviceId,
               );
+              playerWithSeasonStats = fetched.player;
+              seasonStats = fetched.seasonStats;
             } catch (e) {
               console.warn(
                 `Failed to fetch season stats for player ${sportmonksPlayerId}: ${

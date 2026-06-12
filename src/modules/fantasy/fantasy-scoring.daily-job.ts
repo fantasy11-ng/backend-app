@@ -1,5 +1,16 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { FantasyScoringService } from './fantasy-scoring.service';
+import {
+  MATCH_STATS_PROVIDER,
+  MatchStatsProvider,
+} from './match-stats.provider';
+import { PlayersService } from '@/modules/players/players.service';
 
 /**
  * Lightweight, dependency-free "cron" that runs scoring once per day.
@@ -19,6 +30,9 @@ export class FantasyScoringDailyJob implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly scoring: FantasyScoringService,
+    @Inject(MATCH_STATS_PROVIDER)
+    private readonly statsProvider: MatchStatsProvider,
+    private readonly playersService: PlayersService,
   ) {}
 
   onModuleInit() {
@@ -81,6 +95,14 @@ export class FantasyScoringDailyJob implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Daily scoring completed: processed=${result.processed} scored=${result.scored} skippedNoStats=${result.skippedNoStats} errors=${result.errors}`,
       );
+
+      if (result.processed === 0) {
+        this.logger.warn(
+          'Daily scoring processed 0 fixtures. If a match was played, check FANTASY time config (sim/override) and fixture sync.',
+        );
+      }
+
+      await this.refreshSeasonStatsForScoredFixtures(result.scoredFixtureIds);
     } catch (e) {
       this.logger.error(
         `Daily scoring failed: ${(e as Error)?.message ?? e}`,
@@ -88,6 +110,45 @@ export class FantasyScoringDailyJob implements OnModuleInit, OnModuleDestroy {
       );
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  /**
+   * After scoring, refresh season-stat fields for only the match-day squads of
+   * fixtures that were scored. Best-effort: never throws into the daily run.
+   */
+  private async refreshSeasonStatsForScoredFixtures(scoredFixtureIds: number[]) {
+    if (!scoredFixtureIds?.length) return;
+
+    try {
+      const externalIds = new Set<number>();
+      for (const fixtureId of scoredFixtureIds) {
+        try {
+          const ids =
+            await this.statsProvider.getMatchDayPlayerExternalIds(fixtureId);
+          for (const id of ids) externalIds.add(id);
+        } catch (e) {
+          this.logger.warn(
+            `Failed to collect match-day players for fixture ${fixtureId}: ${
+              (e as Error)?.message ?? e
+            }`,
+          );
+        }
+      }
+
+      if (!externalIds.size) return;
+
+      const summary = await this.playersService.refreshSeasonStatsForExternalIds(
+        Array.from(externalIds),
+      );
+      this.logger.log(
+        `Season-stats refresh completed: requested=${summary.requested} refreshed=${summary.refreshed} failed=${summary.failed}`,
+      );
+    } catch (e) {
+      this.logger.error(
+        `Season-stats refresh failed: ${(e as Error)?.message ?? e}`,
+        (e as Error)?.stack,
+      );
     }
   }
 }

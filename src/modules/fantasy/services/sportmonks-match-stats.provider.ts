@@ -16,6 +16,24 @@ export class SportmonksMatchStatsProvider implements MatchStatsProvider {
     @InjectDataSource() private readonly db: DataSource,
   ) {}
 
+  async getMatchDayPlayerExternalIds(fixtureId: number): Promise<number[]> {
+    const fixtureStats =
+      await this.fixturesService.getFixtureStatistics(fixtureId);
+
+    if (!fixtureStats || fixtureStats.length === 0) {
+      return [];
+    }
+
+    const externalIds = new Set<number>();
+    for (const teamStats of fixtureStats) {
+      for (const stat of teamStats.statistics ?? []) {
+        if (stat.player_id) externalIds.add(stat.player_id);
+      }
+    }
+
+    return Array.from(externalIds);
+  }
+
   async getStatsForFixture(fixtureId: number): Promise<PlayerMatchStats[]> {
     try {
       // Fetch fixture statistics from Sportmonks
