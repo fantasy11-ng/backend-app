@@ -579,15 +579,13 @@ export class FantasyService {
 
     const currentSquad = await this.squadRepo.findOne({
       where: { teamId: team.id, isLocked: true },
-      relations: [
-        'players',
-        'players.player',
-        'players.player.position',
-        'players.player.country',
-        'gameweek',
-      ],
+      relations: ['players', 'players.player', 'gameweek'],
       order: { lockedAt: 'DESC', createdAt: 'DESC' },
     });
+
+    if (!team.owner) {
+      throw new NotFoundException('Team owner not found');
+    }
 
     return {
       team: {
