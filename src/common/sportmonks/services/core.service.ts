@@ -29,7 +29,7 @@ export class SportmonksCoreService {
       }
 
       hasMore = Boolean(data.pagination?.has_more);
-      page = data.pagination?.next_page ?? page + 1;
+      page += 1;
     }
 
     return all;

@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { PlayersService } from './players.service';
 import { SportmonksPlayersService } from '@/common/sportmonks/services/players.service';
+import { SportmonksStandingsService } from '@/common/sportmonks/services/standings.service';
 import { SettingsService } from '../settings/settings.service';
 import { FootballService } from '@/common/football/services/football.service';
 import { Player } from './entities/player.entity';
@@ -12,6 +14,7 @@ describe('PlayersService', () => {
   let service: PlayersService;
   let save: jest.Mock;
   let findOne: jest.Mock;
+  let update: jest.Mock;
   let find: jest.Mock;
   let createQueryBuilderWhereInIds: jest.Mock;
   let createQueryBuilderGetMany: jest.Mock;
@@ -34,6 +37,7 @@ describe('PlayersService', () => {
   beforeEach(async () => {
     save = jest.fn(async (payload) => payload);
     findOne = jest.fn(async () => null);
+    update = jest.fn(async () => ({ affected: 1 }));
     find = jest.fn(async () => []);
     createQueryBuilderGetMany = jest.fn(async () => []);
     createQueryBuilderWhereInIds = jest.fn(() => ({
@@ -88,6 +92,18 @@ describe('PlayersService', () => {
           useValue: sportmonksPlayersService,
         },
         {
+          provide: SportmonksStandingsService,
+          useValue: {
+            getNationalTeamStats: jest.fn(async () => []),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn(() => undefined),
+          },
+        },
+        {
           provide: SettingsService,
           useValue: settingsService,
         },
@@ -113,6 +129,7 @@ describe('PlayersService', () => {
                 return {
                   findOne,
                   save,
+                  update,
                   find,
                   createQueryBuilder: jest.fn(() => ({
                     whereInIds: createQueryBuilderWhereInIds,
@@ -237,6 +254,111 @@ describe('PlayersService', () => {
       shotsOnTarget: 18,
       keyPasses: 11,
     });
+  });
+
+  it('never overwrites price or gameName when updating an existing player', async () => {
+    findOne.mockResolvedValueOnce({
+      id: 7,
+      externalId: 7,
+      name: 'Victor Osimhen',
+      rating: 70,
+      price: 7_500_000,
+      gameName: 'Victor Osimhen',
+    });
+
+    await service.upsertFromSportmonksPlayer({
+      sportmonksPlayerId: 7,
+      player: {
+        id: 7,
+        sport_id: 1,
+        country_id: 160,
+        nationality_id: 160,
+        city_id: 1,
+        position_id: 3,
+        detailed_position_id: null,
+        type_id: 3,
+        common_name: 'Osimhen',
+        firstname: 'Victor',
+        lastname: 'Osimhen',
+        name: 'Victor Osimhen',
+        display_name: 'Victor Osimhen',
+        image_path: 'https://cdn.example.com/osimhen.png',
+        height: 185,
+        weight: 78,
+        date_of_birth: '1998-12-29',
+        gender: 'male',
+        position: {
+          id: 3,
+          name: 'Forward',
+          code: 'FWD',
+          developer_name: 'forward',
+          model_type: 'position',
+        },
+      },
+      seasonStats: {
+        minutesPlayed: 900,
+        appearances: 12,
+        lineups: 10,
+        starts: 10,
+        bench: 2,
+        shotsOnTarget: 18,
+        keyPasses: 11,
+      },
+    });
+
+    // Existing players are updated (not full-row saved), and the update payload
+    // must NOT include admin-managed columns.
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+
+    const [, updatePayload] = update.mock.calls[0];
+    expect(updatePayload).not.toHaveProperty('price');
+    expect(updatePayload).not.toHaveProperty('gameName');
+    expect(updatePayload).toMatchObject({
+      minutesPlayed: 900,
+      shotsOnTarget: 18,
+    });
+  });
+
+  it('derives an initial price only when creating a brand-new player', async () => {
+    findOne.mockResolvedValue(null);
+
+    await service.upsertFromSportmonksPlayer({
+      sportmonksPlayerId: 7,
+      player: {
+        id: 7,
+        sport_id: 1,
+        country_id: 160,
+        nationality_id: 160,
+        city_id: 1,
+        position_id: 3,
+        detailed_position_id: null,
+        type_id: 3,
+        common_name: 'Osimhen',
+        firstname: 'Victor',
+        lastname: 'Osimhen',
+        name: 'Victor Osimhen',
+        display_name: 'Victor Osimhen',
+        image_path: 'https://cdn.example.com/osimhen.png',
+        height: 185,
+        weight: 78,
+        date_of_birth: '1998-12-29',
+        gender: 'male',
+        position: {
+          id: 3,
+          name: 'Forward',
+          code: 'FWD',
+          developer_name: 'forward',
+          model_type: 'position',
+        },
+      },
+    });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledTimes(1);
+    const [savePayload] = save.mock.calls[0];
+    expect(savePayload).toHaveProperty('price');
+    expect(typeof savePayload.price).toBe('number');
   });
 
   it('uses fallbackCountryId when Sportmonks country fields are zero', async () => {

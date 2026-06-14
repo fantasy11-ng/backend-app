@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { SportmonksPlayersService } from '@/common/sportmonks/services/players.service';
 import { SportmonksStandingsService } from '@/common/sportmonks/services/standings.service';
 import { DataSource, IsNull } from 'typeorm';
+import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Fixture } from '@/modules/stages/entities/fixture.entity';
 import { Player } from './entities/player.entity';
 import { CreatePlayerDto } from './dto/create-player.dto';
@@ -105,6 +106,22 @@ export class PlayersService {
     @InjectDataSource() private db: DataSource,
   ) {}
 
+  /**
+   * Derive an initial fantasy price (5M–10M) from a player's rating. Only used
+   * when a player is first created; updates never re-derive price so that
+   * admin-adjusted prices are preserved.
+   */
+  private derivePriceFromRating(rating: number): number {
+    const minRating = 40;
+    const maxRating = 90;
+    const clamped =
+      rating < minRating ? minRating : rating > maxRating ? maxRating : rating;
+    const minPrice = 5_000_000;
+    const maxPrice = 10_000_000;
+    const t = (clamped - minRating) / (maxRating - minRating);
+    return Math.round(minPrice + t * (maxPrice - minPrice));
+  }
+
   async createOrUpdatePlayer(data: CreatePlayerDto) {
     const playersRepo = this.db.getRepository(Player);
 
@@ -129,20 +146,44 @@ export class PlayersService {
       });
     }
 
-    // Derive player price between 5M–10M based on rating
     const rating =
       data.rating ?? existingPlayer?.rating ?? DEFAULT_PLAYER_RATING;
-    const minRating = 40;
-    const maxRating = 90;
-    const clamped =
-      rating < minRating ? minRating : rating > maxRating ? maxRating : rating;
-    const minPrice = 5_000_000;
-    const maxPrice = 10_000_000;
-    const t = (clamped - minRating) / (maxRating - minRating);
-    const price = Math.round(minPrice + t * (maxPrice - minPrice));
+
+    if (existingPlayer) {
+      // Update ONLY the columns sourced from the Sportmonks sync/refresh.
+      // Deliberately exclude admin-managed columns such as `price` and
+      // `gameName` so the daily scoring/refresh job can never clobber them.
+      // Undefined values are skipped by TypeORM's update(), so optional
+      // season-stat fields are only written when actually provided.
+      const updates: QueryDeepPartialEntity<Player> = {
+        name: data.name,
+        commonName: data.commonName,
+        image: data.image,
+        pool: data.pool,
+        positionId: data.positionId,
+        position: data.position,
+        countryId: data.countryId,
+        externalId: data.externalId ?? existingPlayer.externalId,
+        rating,
+        points: data.points,
+        minutesPlayed: data.minutesPlayed,
+        appearances: data.appearances,
+        lineups: data.lineups,
+        starts: data.starts,
+        bench: data.bench,
+        shotsOnTarget: data.shotsOnTarget,
+        keyPasses: data.keyPasses,
+      };
+
+      await playersRepo.update(existingPlayer.id, updates);
+
+      return await playersRepo.findOne({ where: { id: existingPlayer.id } });
+    }
+
+    // Brand-new player: derive an initial price from rating.
+    const price = this.derivePriceFromRating(rating);
 
     return await playersRepo.save({
-      ...existingPlayer,
       ...data,
       rating,
       price,
