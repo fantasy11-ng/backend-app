@@ -531,28 +531,7 @@ export class FantasyService {
     });
     if (!team) throw new NotFoundException('Fantasy team not found');
 
-    // Season summary (rank + stats). Defaults to zeros if no scoring yet.
-    const seasonRow = await this.rankingRepo.findOne({
-      where: { fixtureId: 0, teamId: team.id },
-    });
-    const seasonTotalPoints = seasonRow?.totalPoints ?? 0;
-    const betterCount = await this.teamRepo
-      .createQueryBuilder('t')
-      .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
-      .where('COALESCE(r.totalPoints, 0) > :p', { p: seasonTotalPoints })
-      .getCount();
-
-    const season = {
-      rank: betterCount + 1,
-      totalPoints: seasonTotalPoints,
-      goals: seasonRow?.goals ?? 0,
-      assists: seasonRow?.assists ?? 0,
-      saves: seasonRow?.saves ?? 0,
-      yellowCards: seasonRow?.yellowCards ?? 0,
-      redCards: seasonRow?.redCards ?? 0,
-      ownGoals: seasonRow?.ownGoals ?? 0,
-      cleanSheets: seasonRow?.cleanSheets ?? 0,
-    };
+    const season = await this.buildSeasonSummary(team.id);
 
     // If the team exists but the user hasn't created an initial squad yet,
     // return the team and let the client prompt squad creation.
@@ -586,6 +565,70 @@ export class FantasyService {
       }));
 
     return { team, season, currentSquad: currentSquad ?? null };
+  }
+
+  async getPublicTeam(teamId: string) {
+    const team = await this.teamRepo.findOne({
+      where: { id: teamId },
+      relations: ['owner'],
+    });
+    if (!team) throw new NotFoundException('Fantasy team not found');
+
+    const season = await this.buildSeasonSummary(team.id);
+    await this.lockExpiredDraftSquads(team.id);
+
+    const currentSquad = await this.squadRepo.findOne({
+      where: { teamId: team.id, isLocked: true },
+      relations: [
+        'players',
+        'players.player',
+        'players.player.position',
+        'players.player.country',
+        'gameweek',
+      ],
+      order: { lockedAt: 'DESC', createdAt: 'DESC' },
+    });
+
+    return {
+      team: {
+        id: team.id,
+        name: team.name,
+        logoUrl: team.logoUrl,
+        budgetRemaining: Number(team.budgetRemaining),
+        createdAt: team.createdAt,
+        owner: {
+          id: team.owner.id,
+          fullName: team.owner.fullName,
+          profileImageUrl: team.owner.profileImageUrl ?? '',
+        },
+      },
+      season,
+      currentSquad: currentSquad ?? null,
+    };
+  }
+
+  private async buildSeasonSummary(teamId: string) {
+    const seasonRow = await this.rankingRepo.findOne({
+      where: { fixtureId: 0, teamId },
+    });
+    const seasonTotalPoints = seasonRow?.totalPoints ?? 0;
+    const betterCount = await this.teamRepo
+      .createQueryBuilder('t')
+      .leftJoin(FantasyTeamRanking, 'r', 'r.teamId = t.id AND r.fixtureId = 0')
+      .where('COALESCE(r.totalPoints, 0) > :p', { p: seasonTotalPoints })
+      .getCount();
+
+    return {
+      rank: betterCount + 1,
+      totalPoints: seasonTotalPoints,
+      goals: seasonRow?.goals ?? 0,
+      assists: seasonRow?.assists ?? 0,
+      saves: seasonRow?.saves ?? 0,
+      yellowCards: seasonRow?.yellowCards ?? 0,
+      redCards: seasonRow?.redCards ?? 0,
+      ownGoals: seasonRow?.ownGoals ?? 0,
+      cleanSheets: seasonRow?.cleanSheets ?? 0,
+    };
   }
 
   async createTeam(user: User, dto: CreateFantasyTeamDto) {

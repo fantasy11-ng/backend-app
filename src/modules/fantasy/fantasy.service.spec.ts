@@ -695,6 +695,69 @@ describe('FantasyService', () => {
     });
   });
 
+  describe('getPublicTeam', () => {
+    it('returns sanitized team profile and latest locked squad', async () => {
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        name: 'Simina FC',
+        logoUrl: 'https://logo.png',
+        budgetRemaining: 0,
+        createdAt: new Date('2026-06-11T18:06:39.607Z'),
+        owner: {
+          id: 'u1',
+          fullName: 'Siminialayi Ubani',
+          profileImageUrl: '',
+          email: 'secret@example.com',
+          password: 'hashed',
+        },
+      });
+
+      (rankingRepo.findOne as any).mockResolvedValueOnce({
+        totalPoints: 42,
+        goals: 2,
+        assists: 0,
+        saves: 3,
+        yellowCards: 0,
+        redCards: 0,
+        ownGoals: 0,
+        cleanSheets: 1,
+      });
+
+      const qbBetter: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(0),
+      };
+      (teamRepo.createQueryBuilder as any).mockReturnValueOnce(qbBetter);
+
+      (squadRepo.find as any).mockResolvedValueOnce([]);
+      (squadRepo.findOne as any).mockResolvedValueOnce({
+        id: 's1',
+        teamId: 't1',
+        isLocked: true,
+        players: [],
+      });
+
+      const res = await service.getPublicTeam('t1');
+
+      expect(res.team).toEqual({
+        id: 't1',
+        name: 'Simina FC',
+        logoUrl: 'https://logo.png',
+        budgetRemaining: 0,
+        createdAt: new Date('2026-06-11T18:06:39.607Z'),
+        owner: {
+          id: 'u1',
+          fullName: 'Siminialayi Ubani',
+          profileImageUrl: '',
+        },
+      });
+      expect(res.season.totalPoints).toBe(42);
+      expect(res.currentSquad?.id).toBe('s1');
+      expect((res.team.owner as any).email).toBeUndefined();
+    });
+  });
+
   // Additional tests can be added here for:
   // - Team creation validation
   // - Transfer validation

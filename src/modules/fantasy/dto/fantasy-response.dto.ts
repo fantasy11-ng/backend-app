@@ -155,6 +155,76 @@ export class MyTeamResponseDto {
   currentSquad?: FantasySquad | null;
 }
 
+export class PublicTeamOwnerDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  fullName: string;
+
+  @ApiProperty()
+  profileImageUrl: string;
+}
+
+export class PublicTeamDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  logoUrl: string;
+
+  @ApiProperty()
+  budgetRemaining: number;
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  createdAt: Date;
+
+  @ApiProperty({ type: PublicTeamOwnerDto })
+  owner: PublicTeamOwnerDto;
+}
+
+export class PublicTeamResponseDto {
+  @ApiProperty({ type: PublicTeamDto })
+  team: PublicTeamDto;
+
+  @ApiProperty({
+    type: 'object',
+    properties: {
+      rank: { type: 'number' },
+      totalPoints: { type: 'number' },
+      goals: { type: 'number' },
+      assists: { type: 'number' },
+      saves: { type: 'number' },
+      yellowCards: { type: 'number' },
+      redCards: { type: 'number' },
+      ownGoals: { type: 'number' },
+      cleanSheets: { type: 'number' },
+    },
+  })
+  season: {
+    rank: number;
+    totalPoints: number;
+    goals: number;
+    assists: number;
+    saves: number;
+    yellowCards: number;
+    redCards: number;
+    ownGoals: number;
+    cleanSheets: number;
+  };
+
+  @ApiProperty({
+    type: FantasySquad,
+    nullable: true,
+    description:
+      'Most recent locked squad snapshot visible to other managers.',
+  })
+  currentSquad: FantasySquad | null;
+}
+
 export class FantasyRankingListResponseDto {
   @ApiProperty({ type: FantasyTeamRanking, isArray: true })
   data: FantasyTeamRanking[];

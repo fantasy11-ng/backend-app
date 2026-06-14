@@ -32,6 +32,7 @@ import {
   CreateTeamResponseDto,
   FantasyRankingListResponseDto,
   MyTeamResponseDto,
+  PublicTeamResponseDto,
   SimpleMessageResponseDto,
   ApplyBoostResponseDto,
   GetBoostsResponseDto,
@@ -133,6 +134,21 @@ export class FantasyController {
   })
   async getMyTeam(@Req() req: Request) {
     return this.fantasyService.getMyTeam(req.user as User);
+  }
+
+  @Get('team/:teamId/public')
+  @ApiOperation({
+    summary: 'Get public fantasy team profile',
+    description:
+      'Returns a sanitized team profile for any fantasy team. Requires authentication but does not restrict access to the caller’s own team. Excludes private owner fields and only exposes the most recent locked squad snapshot.',
+  })
+  @ApiParam({ name: 'teamId', type: String, description: 'Fantasy team ID' })
+  @ApiOkResponse({
+    description: 'Public team profile',
+    type: PublicTeamResponseDto,
+  })
+  async getPublicTeam(@Param('teamId') teamId: string) {
+    return this.fantasyService.getPublicTeam(teamId);
   }
 
   @Post('team/lineup')
