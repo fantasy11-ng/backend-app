@@ -334,17 +334,19 @@ export class FantasyScoringService {
       const captainStat = captainSp
         ? statsByPlayerId.get(captainSp.playerId)
         : undefined;
+      const captainPlayed = (captainStat?.minutesPlayed ?? 0) > 0;
 
       let effectiveCaptainId: string | null = null;
 
-      if (captainSp && captainStat) {
+      if (captainSp && captainPlayed) {
         effectiveCaptainId = captainSp.id;
       } else {
         const viceCaptainSp = startingPlayers.find((sp) => sp.isViceCaptain);
         const viceCaptainStat = viceCaptainSp
           ? statsByPlayerId.get(viceCaptainSp.playerId)
           : undefined;
-        if (viceCaptainSp && viceCaptainStat) {
+        const viceCaptainPlayed = (viceCaptainStat?.minutesPlayed ?? 0) > 0;
+        if (viceCaptainSp && viceCaptainPlayed) {
           effectiveCaptainId = viceCaptainSp.id;
         }
       }
@@ -354,6 +356,10 @@ export class FantasyScoringService {
       for (const sp of startingPlayers) {
         const stat = statsByPlayerId.get(sp.playerId);
         if (!stat) continue;
+        // Unused substitutes / benched players (0 minutes) do not score and are
+        // excluded from team stat aggregates. Sportmonks still lists them in
+        // fixture statistics, so we must filter them out here.
+        if (stat.minutesPlayed <= 0) continue;
 
         const agg = statsByTeamId.get(teamId)!;
         agg.goals += stat.goals || 0;
@@ -683,7 +689,13 @@ export class FantasyScoringService {
     const c = this.fantasyConfig.scoring;
     let points = 0;
 
-    if (s.minutesPlayed > 0) points += c.playedMatch;
+    // A player who did not play (e.g. an unused substitute / benched the whole
+    // match) scores nothing, even if their team kept a clean sheet or they
+    // carry a rating. Sportmonks lists named substitutes in fixture statistics
+    // with minutes_played = 0, so this guard is required.
+    if (s.minutesPlayed <= 0) return 0;
+
+    points += c.playedMatch;
     points += s.goals * c.goal;
     points += s.assists * c.assist;
 
@@ -711,6 +723,8 @@ export class FantasyScoringService {
 
   private calculateBonusPoints(s: PlayerMatchStats): number {
     const c = this.fantasyConfig.scoring;
+    // No rating bonus for players who did not take the pitch.
+    if (s.minutesPlayed <= 0) return 0;
     if (s.rating == null) return 0;
 
     if (s.rating >= c.ratingHigh.min && s.rating <= c.ratingHigh.max) {
@@ -781,6 +795,9 @@ export class FantasyScoringService {
       const pos = p ? this.toFantasyPositionCode(p) : ('MID' as PositionCode);
       const basePoints = this.calculateBasePoints(pos, s);
       const bonusPoints = this.calculateBonusPoints(s);
+      // Players who did not play earn no points and are not credited a clean
+      // sheet, so their season aggregates stay correct.
+      const played = s.minutesPlayed > 0;
 
       return pfsRepo.create({
         playerId: s.playerId,
@@ -791,7 +808,7 @@ export class FantasyScoringService {
         yellowCards: s.yellowCards || 0,
         redCards: s.redCards || 0,
         fantasyPoints: basePoints + bonusPoints,
-        cleanSheet: s.cleanSheet ?? false,
+        cleanSheet: played ? (s.cleanSheet ?? false) : false,
       });
     });
 
