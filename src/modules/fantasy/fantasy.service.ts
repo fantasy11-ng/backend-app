@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import { In, LessThan, LessThanOrEqual, MoreThan, Repository, EntityManager } from 'typeorm';
 import { FantasyTeam } from './entities/fantasy-team.entity';
 import { FantasySquad } from './entities/fantasy-squad.entity';
 import { FantasySquadPlayer } from './entities/fantasy-squad-player.entity';
@@ -441,26 +441,119 @@ export class FantasyService {
     }
   }
 
+  private countSquadPlayers(squad?: FantasySquad | null): number {
+    return squad?.players?.length ?? 0;
+  }
+
+  private pickCanonicalDraftSquad(drafts: FantasySquad[]): FantasySquad | null {
+    if (!drafts.length) return null;
+
+    return [...drafts].sort((a, b) => {
+      const playerDiff =
+        this.countSquadPlayers(b) - this.countSquadPlayers(a);
+      if (playerDiff !== 0) return playerDiff;
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    })[0];
+  }
+
+  private getSquadRepositories(em?: EntityManager) {
+    if (!em) {
+      return {
+        squadRepo: this.squadRepo,
+        squadPlayerRepo: this.squadPlayerRepo,
+      };
+    }
+
+    return {
+      squadRepo: em.getRepository(FantasySquad),
+      squadPlayerRepo: em.getRepository(FantasySquadPlayer),
+    };
+  }
+
+  private async findDraftSquadsForGameweek(
+    teamId: string,
+    gameweekId: number,
+    em?: EntityManager,
+  ): Promise<FantasySquad[]> {
+    const { squadRepo } = this.getSquadRepositories(em);
+    return squadRepo.find({
+      where: { teamId, gameweekId, isLocked: false },
+      relations: ['players', 'players.player'],
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  private async removeDuplicateEmptyDraftSquads(
+    teamId: string,
+    gameweekId: number,
+    keepSquadId: string,
+    em?: EntityManager,
+  ): Promise<void> {
+    const { squadRepo } = this.getSquadRepositories(em);
+    const duplicates = await squadRepo.find({
+      where: { teamId, gameweekId, isLocked: false },
+      relations: ['players'],
+    });
+
+    const toRemove = duplicates.filter(
+      (squad) =>
+        squad.id !== keepSquadId && this.countSquadPlayers(squad) === 0,
+    );
+
+    if (toRemove.length) {
+      await squadRepo.remove(toRemove);
+    }
+  }
+
+  private async markSquadAsCurrent(
+    teamId: string,
+    squad: FantasySquad,
+    em?: EntityManager,
+  ): Promise<void> {
+    if (squad.isCurrent) return;
+
+    const { squadRepo } = this.getSquadRepositories(em);
+    await squadRepo.update({ teamId, isCurrent: true }, { isCurrent: false });
+    squad.isCurrent = true;
+    await squadRepo.save(squad);
+  }
+
+  private async resolveDraftSquadForGameweek(
+    teamId: string,
+    gameweekId: number,
+    em?: EntityManager,
+  ): Promise<FantasySquad | null> {
+    const drafts = await this.findDraftSquadsForGameweek(
+      teamId,
+      gameweekId,
+      em,
+    );
+    if (!drafts.length) return null;
+
+    const canonical = this.pickCanonicalDraftSquad(drafts);
+    if (!canonical) return null;
+
+    await this.removeDuplicateEmptyDraftSquads(
+      teamId,
+      gameweekId,
+      canonical.id,
+      em,
+    );
+    await this.markSquadAsCurrent(teamId, canonical, em);
+    return canonical;
+  }
+
   private async getOrCreateDraftSquadForGameweek(
     team: FantasyTeam,
     gameweek: FantasyGameweek,
   ) {
     await this.lockExpiredDraftSquads(team.id);
 
-    // Prefer an existing draft for this gameweek
-    const existing = await this.squadRepo.findOne({
-      where: { teamId: team.id, gameweekId: gameweek.id, isLocked: false },
-      relations: ['players', 'players.player'],
-    });
+    const existing = await this.resolveDraftSquadForGameweek(
+      team.id,
+      gameweek.id,
+    );
     if (existing) {
-      if (!existing.isCurrent) {
-        await this.squadRepo.update(
-          { teamId: team.id, isCurrent: true },
-          { isCurrent: false },
-        );
-        existing.isCurrent = true;
-        await this.squadRepo.save(existing);
-      }
       return existing;
     }
 
@@ -477,51 +570,61 @@ export class FantasyService {
       return legacy;
     }
 
-    // Otherwise create a new draft by copying the latest known squad snapshot
-    const base = await this.squadRepo.findOne({
-      where: { teamId: team.id },
-      order: { createdAt: 'DESC' },
-      relations: ['players', 'players.player'],
+    // Create a new draft by copying the latest known squad snapshot.
+    // Transaction + re-check prevents concurrent requests creating duplicates.
+    return this.teamRepo.manager.transaction(async (em) => {
+      const resolved = await this.resolveDraftSquadForGameweek(
+        team.id,
+        gameweek.id,
+        em,
+      );
+      if (resolved) {
+        return resolved;
+      }
+
+      const { squadRepo, squadPlayerRepo } = this.getSquadRepositories(em);
+      const base = await squadRepo.findOne({
+        where: { teamId: team.id },
+        order: { createdAt: 'DESC' },
+        relations: ['players', 'players.player'],
+      });
+      if (!base) {
+        throw new BadRequestException('You must create a squad first');
+      }
+
+      await squadRepo.update({ teamId: team.id, isCurrent: true }, { isCurrent: false });
+
+      const draft = await squadRepo.save(
+        squadRepo.create({
+          team,
+          teamId: team.id,
+          formation: base.formation,
+          gameweekId: gameweek.id,
+          isLocked: false,
+          lockedAt: null,
+          isCurrent: true,
+        }),
+      );
+
+      const players = base.players.map((sp) =>
+        squadPlayerRepo.create({
+          squad: draft,
+          squadId: draft.id,
+          player: sp.player,
+          playerId: sp.playerId,
+          position: sp.position,
+          isStarting: sp.isStarting,
+          isCaptain: sp.isCaptain,
+          isViceCaptain: sp.isViceCaptain,
+          isPenaltyTaker: sp.isPenaltyTaker,
+          isFreeKickTaker: sp.isFreeKickTaker,
+        }),
+      );
+      await squadPlayerRepo.save(players);
+
+      draft.players = players;
+      return draft;
     });
-    if (!base) {
-      throw new BadRequestException('You must create a squad first');
-    }
-
-    await this.squadRepo.update(
-      { teamId: team.id, isCurrent: true },
-      { isCurrent: false },
-    );
-
-    const draft = await this.squadRepo.save(
-      this.squadRepo.create({
-        team,
-        teamId: team.id,
-        formation: base.formation,
-        gameweekId: gameweek.id,
-        isLocked: false,
-        lockedAt: null,
-        isCurrent: true,
-      }),
-    );
-
-    const players = base.players.map((sp) =>
-      this.squadPlayerRepo.create({
-        squad: draft,
-        squadId: draft.id,
-        player: sp.player,
-        playerId: sp.playerId,
-        position: sp.position,
-        isStarting: sp.isStarting,
-        isCaptain: sp.isCaptain,
-        isViceCaptain: sp.isViceCaptain,
-        isPenaltyTaker: sp.isPenaltyTaker,
-        isFreeKickTaker: sp.isFreeKickTaker,
-      }),
-    );
-    await this.squadPlayerRepo.save(players);
-
-    draft.players = players;
-    return draft;
   }
 
   async getMyTeam(user: User) {
@@ -568,6 +671,12 @@ export class FantasyService {
   }
 
   async getPublicTeam(teamId: string) {
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(teamId)) {
+      throw new NotFoundException('Fantasy team not found');
+    }
+
     const team = await this.teamRepo.findOne({
       where: { id: teamId },
       relations: ['owner'],

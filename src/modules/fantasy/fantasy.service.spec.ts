@@ -64,6 +64,7 @@ describe('FantasyService', () => {
             save: jest.fn(),
             find: jest.fn(),
             update: jest.fn(),
+            remove: jest.fn(),
           },
         },
         {
@@ -537,6 +538,70 @@ describe('FantasyService', () => {
     });
   });
 
+  describe('getMyTeam (duplicate draft squads)', () => {
+    it('returns the populated draft when empty duplicates exist for the same gameweek', async () => {
+      const user = { id: 'u1' } as any;
+      const populatedDraft = {
+        id: 'draft-with-players',
+        teamId: 't1',
+        gameweekId: 18,
+        isLocked: false,
+        isCurrent: false,
+        createdAt: new Date('2026-06-12T18:04:25.623Z'),
+        players: [{ id: 'sp1', playerId: 1, isStarting: true, player: { id: 1, points: 5 } }],
+      };
+      const emptyDraft = {
+        id: 'draft-empty',
+        teamId: 't1',
+        gameweekId: 18,
+        isLocked: false,
+        isCurrent: true,
+        createdAt: new Date('2026-06-12T18:04:26.442Z'),
+        players: [],
+      };
+
+      (teamRepo.findOne as any).mockResolvedValueOnce({
+        id: 't1',
+        ownerId: 'u1',
+        squads: [{ id: 's1' }],
+      });
+      (rankingRepo.findOne as any).mockResolvedValueOnce(null);
+      (teamRepo.createQueryBuilder as any).mockReturnValueOnce({
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(0),
+      });
+
+      const upcomingGameweek = {
+        id: 18,
+        snapshotDeadlineAt: new Date('2099-01-01T00:00:00.000Z'),
+      };
+      (gameweekRepo.createQueryBuilder as any).mockReturnValueOnce({
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(upcomingGameweek),
+      });
+
+      (squadRepo.find as any)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([populatedDraft, emptyDraft])
+        .mockResolvedValueOnce([populatedDraft, emptyDraft]);
+
+      (squadRepo.remove as any).mockResolvedValueOnce(undefined);
+      (squadRepo.update as any).mockResolvedValueOnce(undefined);
+      (squadRepo.save as any).mockResolvedValueOnce({
+        ...populatedDraft,
+        isCurrent: true,
+      });
+
+      const res = await service.getMyTeam(user);
+
+      expect(squadRepo.remove).toHaveBeenCalledWith([emptyDraft]);
+      expect(res.currentSquad?.id).toBe('draft-with-players');
+      expect(res.currentSquad?.players).toHaveLength(1);
+    });
+  });
+
   describe('getMyTeam (season ended)', () => {
     it('should return the last/current squad instead of throwing when there is no upcoming gameweek', async () => {
       const user = { id: 'u1' } as any;
@@ -696,9 +761,11 @@ describe('FantasyService', () => {
   });
 
   describe('getPublicTeam', () => {
+    const teamId = '9a59b9e6-6eb8-4ae3-8358-d60d043fcecb';
+
     it('returns sanitized team profile and latest locked squad', async () => {
       (teamRepo.findOne as any).mockResolvedValueOnce({
-        id: 't1',
+        id: teamId,
         name: 'Simina FC',
         logoUrl: 'https://logo.png',
         budgetRemaining: 0,
@@ -733,15 +800,15 @@ describe('FantasyService', () => {
       (squadRepo.find as any).mockResolvedValueOnce([]);
       (squadRepo.findOne as any).mockResolvedValueOnce({
         id: 's1',
-        teamId: 't1',
+        teamId,
         isLocked: true,
         players: [],
       });
 
-      const res = await service.getPublicTeam('t1');
+      const res = await service.getPublicTeam(teamId);
 
       expect(res.team).toEqual({
-        id: 't1',
+        id: teamId,
         name: 'Simina FC',
         logoUrl: 'https://logo.png',
         budgetRemaining: 0,

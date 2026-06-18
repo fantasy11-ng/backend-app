@@ -88,6 +88,59 @@ CREATE INDEX IF NOT EXISTS "IDX_fantasy_squad_gameweekId"
       `);
 
       /**
+       * One unlocked draft per team/gameweek. Clean up empty duplicates left by
+       * concurrent draft creation before applying the partial unique index.
+       */
+      await this.dataSource.query(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'fantasy_squad'
+  ) THEN
+    DELETE FROM "fantasy_squad_player" sp
+    USING "fantasy_squad" s
+    WHERE sp."squadId" = s.id
+      AND s."isLocked" = false
+      AND s."gameweekId" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "fantasy_squad_player" sp2 WHERE sp2."squadId" = s.id
+      )
+      AND EXISTS (
+        SELECT 1 FROM "fantasy_squad" s2
+        WHERE s2."teamId" = s."teamId"
+          AND s2."gameweekId" = s."gameweekId"
+          AND s2."isLocked" = false
+          AND s2.id <> s.id
+          AND EXISTS (
+            SELECT 1 FROM "fantasy_squad_player" sp3 WHERE sp3."squadId" = s2.id
+          )
+      );
+
+    DELETE FROM "fantasy_squad" s
+    WHERE s."isLocked" = false
+      AND s."gameweekId" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "fantasy_squad_player" sp WHERE sp."squadId" = s.id
+      )
+      AND EXISTS (
+        SELECT 1 FROM "fantasy_squad" s2
+        WHERE s2."teamId" = s."teamId"
+          AND s2."gameweekId" = s."gameweekId"
+          AND s2."isLocked" = false
+          AND EXISTS (
+            SELECT 1 FROM "fantasy_squad_player" sp2 WHERE sp2."squadId" = s2.id
+          )
+      );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS "IDX_fantasy_squad_team_gameweek_draft"
+      ON "fantasy_squad" ("teamId", "gameweekId")
+      WHERE "isLocked" = false AND "gameweekId" IS NOT NULL;
+  END IF;
+END $$;
+      `);
+
+      /**
        * Player fixture stats: persist per-fixture clean sheet flag so it can be
        * aggregated into the player's season clean-sheet total.
        */

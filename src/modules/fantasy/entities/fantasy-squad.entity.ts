@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -12,6 +13,10 @@ import { FantasySquadPlayer } from './fantasy-squad-player.entity';
 import { FantasyGameweek } from './fantasy-gameweek.entity';
 
 @Entity()
+@Index(['teamId', 'gameweekId'], {
+  unique: true,
+  where: '"isLocked" = false AND "gameweekId" IS NOT NULL',
+})
 export class FantasySquad {
   @PrimaryGeneratedColumn('uuid')
   id: string;
