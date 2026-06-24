@@ -445,6 +445,22 @@ export class FantasyService {
     return squad?.players?.length ?? 0;
   }
 
+  /** Latest squad snapshot that actually has players (for draft copy source). */
+  private async findLatestSquadWithPlayers(
+    teamId: string,
+    squadRepo: Repository<FantasySquad>,
+  ): Promise<FantasySquad | null> {
+    const squads = await squadRepo.find({
+      where: { teamId },
+      relations: ['players', 'players.player'],
+      order: { createdAt: 'DESC' },
+    });
+
+    return (
+      squads.find((squad) => this.countSquadPlayers(squad) > 0) ?? null
+    );
+  }
+
   private pickCanonicalDraftSquad(drafts: FantasySquad[]): FantasySquad | null {
     if (!drafts.length) return null;
 
@@ -553,8 +569,11 @@ export class FantasyService {
       team.id,
       gameweek.id,
     );
-    if (existing) {
+    if (existing && this.countSquadPlayers(existing) > 0) {
       return existing;
+    }
+    if (existing && this.countSquadPlayers(existing) === 0) {
+      await this.squadRepo.remove(existing);
     }
 
     // Legacy fallback: first-ever squad may have no gameweekId yet
@@ -583,11 +602,7 @@ export class FantasyService {
       }
 
       const { squadRepo, squadPlayerRepo } = this.getSquadRepositories(em);
-      const base = await squadRepo.findOne({
-        where: { teamId: team.id },
-        order: { createdAt: 'DESC' },
-        relations: ['players', 'players.player'],
-      });
+      const base = await this.findLatestSquadWithPlayers(team.id, squadRepo);
       if (!base) {
         throw new BadRequestException('You must create a squad first');
       }
