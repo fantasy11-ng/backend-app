@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { StagesService } from './stages.service';
+import { StagesSyncDailyJob } from './stages-sync.daily-job';
 import { StagesController } from './stages.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Stage } from './entities/stage.entity';
@@ -18,7 +19,7 @@ import { ConfigModule } from '@nestjs/config';
     SettingsModule,
   ],
   controllers: [StagesController],
-  providers: [StagesService],
+  providers: [StagesService, StagesSyncDailyJob],
   exports: [StagesService],
 })
 export class StagesModule {}
