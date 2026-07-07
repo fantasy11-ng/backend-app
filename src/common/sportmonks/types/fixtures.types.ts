@@ -70,4 +70,27 @@ export type SportmonksFixture = {
       position: number;
     };
   }[];
+  scores?: SportmonksFixtureScore[];
+  state?: SportmonksFixtureState;
+};
+
+export type SportmonksFixtureScore = {
+  id: number;
+  fixture_id: number;
+  type_id: number;
+  participant_id: number;
+  score: {
+    goals: number;
+    participant: 'home' | 'away' | string;
+  };
+  // e.g. "CURRENT", "1ST_HALF", "2ND_HALF", "2ND_HALF_ONLY"
+  description: string;
+};
+
+export type SportmonksFixtureState = {
+  id: number;
+  state: string; // machine code, e.g. "FT", "NS", "LIVE"
+  name: string; // human readable, e.g. "Full Time"
+  short_name: string;
+  developer_name: string;
 };

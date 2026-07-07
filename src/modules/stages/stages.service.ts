@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
 import { SportmonksStagesService } from '@/common/sportmonks/services/stages.service';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Group } from './entities/group.entity';
 import { Stage } from './entities/stage.entity';
 import { SportmonksStage } from '@/common/sportmonks/types/stages.type';
+import { SportmonksFixture } from '@/common/sportmonks/types/fixtures.types';
 import { FootballTeam } from '../team/entities/football-team.entity';
 import { Fixture } from './entities/fixture.entity';
 import { SportmonksRoundsService } from '@/common/sportmonks/services/rounds.service';
@@ -20,6 +21,7 @@ import {
   roundCodeToStageCode,
   stageCodeToRoundCode,
 } from './stage-code.utils';
+import { QueryFixturesDto } from './dto/query-fixtures.dto';
 
 @Injectable()
 export class StagesService {
@@ -178,6 +180,7 @@ export class StagesService {
     for (const stage of stages) {
       for (const fx of stage.fixtures || []) {
         const participantIds = (fx.participants || []).map((p) => p.id);
+        const result = this.extractFixtureResult(fx);
         await fixturesRepo.save({
           id: fx.id,
           stageId: stage.id,
@@ -186,9 +189,70 @@ export class StagesService {
           startingAt: new Date(fx.starting_at),
           externalSeasonId: stage.season_id,
           participantTeamIds: participantIds,
+          name: fx.name ?? null,
+          stateId: fx.state_id ?? null,
+          finished: result.finished,
+          homeTeamId: result.homeTeamId,
+          awayTeamId: result.awayTeamId,
+          homeGoals: result.homeGoals,
+          awayGoals: result.awayGoals,
+          winnerTeamId: result.winnerTeamId,
+          resultInfo: fx.result_info ?? null,
         });
       }
     }
+  }
+
+  /**
+   * Derives a fixture's result from SportMonks fixture data.
+   *
+   * - Home/away teams come from participants[].meta.location.
+   * - Goals come from the scores[] rows with description === 'CURRENT'
+   *   (the running/final scoreline), matched by participant_id.
+   * - Winner comes from participants[].meta.winner (null for draws/unplayed).
+   * - "finished" is inferred from SportMonks state (state_id 5 = Full Time)
+   *   or from a populated result_info string.
+   *
+   * All fields are null when data isn't available yet (e.g. placeholder or
+   * upcoming fixtures), so re-running sync backfills results once played.
+   */
+  private extractFixtureResult(fx: SportmonksFixture): {
+    finished: boolean;
+    homeTeamId: number | null;
+    awayTeamId: number | null;
+    homeGoals: number | null;
+    awayGoals: number | null;
+    winnerTeamId: number | null;
+  } {
+    const participants = fx.participants || [];
+    const home = participants.find((p) => p.meta?.location === 'home');
+    const away = participants.find((p) => p.meta?.location === 'away');
+
+    const currentGoalsFor = (participantId?: number): number | null => {
+      if (!participantId) return null;
+      const row = (fx.scores || []).find(
+        (s) =>
+          s.participant_id === participantId &&
+          (s.description || '').toUpperCase() === 'CURRENT',
+      );
+      const goals = row?.score?.goals;
+      return Number.isFinite(Number(goals)) ? Number(goals) : null;
+    };
+
+    const winner = participants.find((p) => p.meta?.winner === true);
+
+    // FINISHED (5) is the numeric state id for full time in SportMonks.
+    const finished =
+      fx.state_id === 5 || (!!fx.result_info && fx.result_info.trim().length > 0);
+
+    return {
+      finished,
+      homeTeamId: home?.id ?? null,
+      awayTeamId: away?.id ?? null,
+      homeGoals: currentGoalsFor(home?.id),
+      awayGoals: currentGoalsFor(away?.id),
+      winnerTeamId: winner?.id ?? null,
+    };
   }
 
   async getTournamentStartAt(seasonId: number) {
@@ -200,6 +264,175 @@ export class StagesService {
       .limit(1);
     const first = await qb.getOne();
     return first?.startingAt ?? null;
+  }
+
+  /**
+   * Full-featured, paginated listing of fixtures (played + upcoming) for a
+   * season, enriched with team details and (for played fixtures) the result.
+   *
+   * Filtering: status (played/upcoming/live/all), round code (r32/r16/qf/...),
+   * stageId, gameweekId, groupId, teamId, and a free-text search on name.
+   */
+  async getFixtures(query: QueryFixturesDto) {
+    const fixturesRepo = this.db.getRepository(Fixture);
+
+    // Resolve season (explicit override, else active main-league season).
+    let seasonId = query.seasonId;
+    if (!seasonId) {
+      const mainFootballLeague =
+        await this.settingsService.getMainServiceLeague();
+      seasonId = mainFootballLeague?.currentSeason?.serviceId;
+    }
+    if (!seasonId) {
+      return this.emptyFixturePage(query);
+    }
+
+    const qb = fixturesRepo
+      .createQueryBuilder('f')
+      .where('f.externalSeasonId = :seasonId', { seasonId });
+
+    // Resolve a round code (e.g. "r16", "qf", "group-stage") to a stageId.
+    if (query.round) {
+      const stageId = await this.resolveStageIdFromRound(query.round, seasonId);
+      // Unknown round code -> no fixtures rather than silently ignoring it.
+      if (!stageId) return this.emptyFixturePage(query);
+      qb.andWhere('f.stageId = :roundStageId', { roundStageId: stageId });
+    }
+
+    if (query.stageId) {
+      qb.andWhere('f.stageId = :stageId', { stageId: query.stageId });
+    }
+    if (query.gameweekId) {
+      qb.andWhere('f.gameweekId = :gameweekId', {
+        gameweekId: query.gameweekId,
+      });
+    }
+    if (query.groupId) {
+      qb.andWhere('f.groupId = :groupId', { groupId: query.groupId });
+    }
+    if (query.teamId) {
+      qb.andWhere(':teamId = ANY(f.participantTeamIds)', {
+        teamId: query.teamId,
+      });
+    }
+    if (query.search) {
+      qb.andWhere('f.name ILIKE :search', { search: `%${query.search}%` });
+    }
+
+    const now = new Date();
+    if (query.status === 'played') {
+      qb.andWhere('(f.finished = true OR f.startingAt <= :now)', { now });
+    } else if (query.status === 'upcoming') {
+      qb.andWhere('f.finished = false AND f.startingAt > :now', { now });
+    } else if (query.status === 'live') {
+      qb.andWhere('f.finished = false AND f.startingAt <= :now', { now });
+    }
+
+    const [, direction] = query.sort.split(':') as [string, 'ASC' | 'DESC'];
+    qb.orderBy('f.startingAt', direction).addOrderBy('f.id', 'ASC');
+
+    const take = query.limit;
+    const skip = (query.page - 1) * take;
+    qb.skip(skip).take(take);
+
+    const [fixtures, total] = await qb.getManyAndCount();
+
+    // Batch-load participating teams for this page.
+    const teamIds = Array.from(
+      new Set(fixtures.flatMap((f) => f.participantTeamIds || [])),
+    );
+    const teams = teamIds.length
+      ? await this.db.getRepository(FootballTeam).find({
+          where: { id: In(teamIds) },
+        })
+      : [];
+    const teamById = new Map(teams.map((t) => [t.id, t]));
+
+    const data = fixtures.map((f) => this.toFixtureView(f, teamById, now));
+
+    return {
+      data,
+      meta: {
+        total,
+        page: query.page,
+        limit: take,
+        totalPages: Math.max(1, Math.ceil(total / take)),
+        seasonId,
+      },
+    };
+  }
+
+  private emptyFixturePage(query: QueryFixturesDto) {
+    return {
+      data: [],
+      meta: {
+        total: 0,
+        page: query.page,
+        limit: query.limit,
+        totalPages: 1,
+        seasonId: query.seasonId ?? null,
+      },
+    };
+  }
+
+  private async resolveStageIdFromRound(
+    round: string,
+    seasonId: number,
+  ): Promise<number | null> {
+    const code =
+      round === 'group-stage' ? 'group-stage' : roundCodeToStageCode(round);
+    if (!code) return null;
+    const stage = await this.db.getRepository(Stage).findOne({
+      where: { code, externalSeasonId: seasonId },
+    });
+    return stage?.id ?? null;
+  }
+
+  private toFixtureView(
+    f: Fixture,
+    teamById: Map<number, FootballTeam>,
+    now: Date,
+  ) {
+    const toTeam = (id?: number) => {
+      if (id == null) return null;
+      const t = teamById.get(id);
+      return t
+        ? { id: t.id, name: t.name, short: t.short, logo: t.logo }
+        : { id, name: null, short: null, logo: null };
+    };
+
+    const isPlayed = f.finished || f.startingAt <= now;
+    const status: 'played' | 'live' | 'upcoming' = f.finished
+      ? 'played'
+      : f.startingAt <= now
+        ? 'live'
+        : 'upcoming';
+
+    const hasScore =
+      isPlayed && f.homeGoals != null && f.awayGoals != null;
+
+    return {
+      id: f.id,
+      name: f.name ?? null,
+      startingAt: f.startingAt,
+      status,
+      stageId: f.stageId,
+      roundId: f.roundId ?? null,
+      groupId: f.groupId ?? null,
+      gameweekId: f.gameweekId ?? null,
+      participants: (f.participantTeamIds || []).map((id) => toTeam(id)),
+      home: toTeam(f.homeTeamId),
+      away: toTeam(f.awayTeamId),
+      result: hasScore
+        ? {
+            homeGoals: f.homeGoals,
+            awayGoals: f.awayGoals,
+            winnerTeamId: f.winnerTeamId ?? null,
+            finished: f.finished,
+            info: f.resultInfo ?? null,
+          }
+        : null,
+    };
   }
 
   private async syncGameweeks(
